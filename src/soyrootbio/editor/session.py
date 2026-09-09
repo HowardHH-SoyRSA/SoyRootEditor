@@ -120,7 +120,10 @@ class EditorSession:
         *,
         session_dir: str | Path | None = None,
         load_existing_log: bool = True,
+        read_only: bool = False,
     ) -> None:
+        self.read_only = bool(read_only)
+        self._closed = False
         self.output_dir = Path(output_dir).resolve()
         self._require_bundle()
         self.mesh: LabeledMesh = read_labeled_ply(
@@ -148,9 +151,11 @@ class EditorSession:
             if session_dir is not None
             else self.output_dir / ".soyrootbio-editor"
         )
-        self.session_dir.mkdir(parents=True, exist_ok=True)
+        if not self.read_only:
+            self.session_dir.mkdir(parents=True, exist_ok=True)
         self.blob_dir = self.session_dir / "blobs"
-        self.blob_dir.mkdir(parents=True, exist_ok=True)
+        if not self.read_only:
+            self.blob_dir.mkdir(parents=True, exist_ok=True)
         self.log_path = self.session_dir / "operations.jsonl"
         self.manifest_path = self.session_dir / "session.json"
         self.hardware: HardwareInfo = detect_hardware()
@@ -168,7 +173,8 @@ class EditorSession:
         self._pending_old_assignment_chunks: list[np.ndarray] = []
         self._pending_created_blobs: list[Path] = []
         self.label_revision = 0
-        self._write_session_manifest()
+        if not self.read_only:
+            self._write_session_manifest()
         if load_existing_log and self.log_path.exists():
             self._replay_log()
 
@@ -188,6 +194,7 @@ class EditorSession:
             ]
             return {
                 "schema": "soyrootbio.editor-state/v1",
+                "read_only": self.read_only,
                 "baseline_fingerprint": self.baseline_fingerprint,
                 "source_output_dir": str(self.output_dir),
                 "session_dir": str(self.session_dir),
@@ -235,6 +242,9 @@ class EditorSession:
         persist: bool = True,
     ) -> dict[str, Any]:
         with self._lock:
+            self._ensure_open()
+            if persist:
+                self._require_writable()
             sequence_before = self._sequence
             label_revision_before = self.label_revision
             redo_before = list(self._redo)
@@ -298,6 +308,7 @@ class EditorSession:
 
     def operation_log_text(self) -> str:
         with self._lock:
+            self._ensure_open()
             return (
                 self.log_path.read_text(encoding="utf-8")
                 if self.log_path.exists()
@@ -306,6 +317,9 @@ class EditorSession:
 
     def undo(self, *, persist: bool = True) -> dict[str, Any]:
         with self._lock:
+            self._ensure_open()
+            if persist:
+                self._require_writable()
             if not self._history:
                 raise EditorValidationError("There is no operation to undo.")
             roots_before = self._clone_roots(self.roots)
@@ -352,6 +366,9 @@ class EditorSession:
 
     def redo(self, *, persist: bool = True) -> dict[str, Any]:
         with self._lock:
+            self._ensure_open()
+            if persist:
+                self._require_writable()
             if not self._redo:
                 raise EditorValidationError("There is no operation to redo.")
             sequence_before = self._sequence
@@ -387,6 +404,8 @@ class EditorSession:
         """Write edited artefacts without altering the automatic bundle."""
 
         with self._lock:
+            self._ensure_open()
+            self._require_writable()
             target = (
                 Path(target_dir).resolve()
                 if target_dir is not None
@@ -520,6 +539,33 @@ class EditorSession:
                 encoding="utf-8",
             )
             return target
+
+    @property
+    def closed(self) -> bool:
+        return self._closed
+
+    def close(self) -> None:
+        """Durably finish this editor session and reject later mutations."""
+
+        with self._lock:
+            if self._closed:
+                return
+            if not self.read_only and self.log_path.exists():
+                with self.log_path.open("ab") as handle:
+                    handle.flush()
+                    os.fsync(handle.fileno())
+            self._closed = True
+
+    def _ensure_open(self) -> None:
+        if self._closed:
+            raise EditorValidationError("This editor session has been closed.")
+
+    def _require_writable(self) -> None:
+        if self.read_only:
+            raise EditorValidationError(
+                "This dataset is already open for editing in another viewer window. "
+                "This duplicate view is read-only."
+            )
 
     # ------------------------------------------------------------------
     # Operation execution

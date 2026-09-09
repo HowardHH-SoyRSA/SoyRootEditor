@@ -12,8 +12,18 @@ After installation, open a result bundle with:
 soyrootbio editor --output "D:\results\sample"
 ```
 
+The desktop shortcut or `soyrootbio editor` opens the viewer with a folder
+chooser. The **Dataset** selector beside the active-dataset name provides
+recent folders, browsing, switching, and an additional-window action.
+
 The directory should contain `segmented_root_structure.ply`,
 `root_hierarchy.json`, `root_traits.csv`, and the other SoyRootBio outputs.
+
+When switching, the next bundle is validated before the previous operation log
+is flushed and closed. A failed switch retains the previous dataset. Unfinished
+Create and Redraw paths present Finish, Discard, and Cancel choices. Separate
+viewer windows have independent camera and edit state. Opening the same session
+twice produces a read-only duplicate, preventing concurrent log writes.
 
 ## Inspect and navigate
 
@@ -52,6 +62,8 @@ operation. A normal left-drag continues to orbit the model. `Ctrl+Z` and
 - Automatic PLY, hierarchy, traits, and RSML outputs are opened read-only.
 - Each session has a source fingerprint and an append-only `operations.jsonl`
   history. Large point sets are stored as hashed NumPy sidecar blobs.
+- Every accepted edit is flushed to disk. Switching datasets closes the prior
+  session after the next dataset has passed validation.
 - **Export edits** writes a separate materialised bundle containing the edited
   labelled PLY, hierarchy JSON, CSV traits/label map, nested RSML, operation
   log, blobs, and manifest. The automatic result is never overwritten.
@@ -71,4 +83,3 @@ The viewer inherits the colours written by SoyRootBio exports:
 | Higher order (O4+) | `#F2A614` |
 | Uncertain | `#FA7A0D` |
 | Unassigned | `#8C8C8C` |
-

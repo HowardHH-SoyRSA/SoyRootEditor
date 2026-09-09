@@ -29,9 +29,14 @@ powershell -ExecutionPolicy Bypass -File .\packaging\windows\Install-SoyRootEdit
 
 ## Launch
 
-- Use the desktop shortcut or `Launch-SoyRootBio-GUI.cmd` for the batch GUI.
+- Use the **SoyRootEditor** desktop shortcut to open the 3D viewer and choose a
+  completed output folder.
+- Use `Launch-SoyRootBio-GUI.cmd` for the batch analysis GUI.
 - Use `Launch-SoyRootEditor.cmd "D:\results\sample"` to open a completed
   SoyRootBio bundle directly in the 3D editor.
+- If the local viewer service is already running, the launcher reuses it and
+  opens an independent viewer window. The **Dataset** control switches folders;
+  the adjacent new-window button opens additional datasets simultaneously.
 - The editor server binds to `127.0.0.1` by default.
 
 ## Troubleshooting
@@ -45,4 +50,3 @@ powershell -ExecutionPolicy Bypass -File .\packaging\windows\Install-SoyRootEdit
 
 The current bundle is not fully offline: a future release can add a wheelhouse
 of pinned third-party wheels for air-gapped installation.
-

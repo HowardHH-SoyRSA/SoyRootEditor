@@ -98,10 +98,140 @@ export function ConnectionScreen({
   );
 }
 
+export function DatasetOpenScreen({
+  recentDatasets,
+  busy,
+  error,
+  onBrowse,
+  onOpen,
+  onNewWindow,
+}: {
+  recentDatasets: string[];
+  busy: boolean;
+  error: string;
+  onBrowse: () => void;
+  onOpen: (path: string) => void;
+  onNewWindow: () => void;
+}) {
+  return (
+    <main className="connection-screen">
+      <div className="connection-glow" />
+      <section className="connection-card dataset-open-card">
+        <div className="connection-brand">
+          <div className="brand-mark large" aria-hidden="true"><span /><span /><span /></div>
+          <p>SOYROOTBIO</p>
+          <h1>Choose a root dataset.</h1>
+          <span>
+            Open a completed output folder containing the labelled PLY,
+            hierarchy, traits, and label map.
+          </span>
+        </div>
+        <div className="dataset-open-actions">
+          <button type="button" className="button primary-button" onClick={onBrowse} disabled={busy}>
+            {busy ? "Opening folder chooser…" : "Browse output folder"}
+          </button>
+          <button type="button" className="button quiet-button" onClick={onNewWindow} disabled={busy}>
+            Open another viewer window
+          </button>
+          {error ? <p className="dataset-error">{error}</p> : null}
+          {recentDatasets.length ? (
+            <div className="recent-datasets">
+              <span>RECENT DATASETS</span>
+              {recentDatasets.map((path) => (
+                <button key={path} type="button" onClick={() => onOpen(path)} disabled={busy} title={path}>
+                  <strong>{leafName(path)}</strong><small>{path}</small>
+                </button>
+              ))}
+            </div>
+          ) : null}
+        </div>
+      </section>
+    </main>
+  );
+}
+
+export function DatasetSelector({
+  currentPath,
+  recentDatasets,
+  busy,
+  onSelect,
+  onBrowse,
+  onNewWindow,
+}: {
+  currentPath: string;
+  recentDatasets: string[];
+  busy: boolean;
+  onSelect: (path: string) => void;
+  onBrowse: () => void;
+  onNewWindow: () => void;
+}) {
+  const choices = recentDatasets.filter((path) => path !== currentPath);
+  return (
+    <div className="dataset-selector" title={currentPath}>
+      <label>
+        <span>DATASET</span>
+        <select
+          value={currentPath}
+          disabled={busy}
+          onChange={(event) => {
+            const value = event.target.value;
+            if (value === "__browse__") onBrowse();
+            else if (value !== currentPath) onSelect(value);
+          }}
+        >
+          <option value={currentPath}>{leafName(currentPath)}</option>
+          {choices.map((path) => (
+            <option key={path} value={path}>{leafName(path)}</option>
+          ))}
+          <option value="__browse__">Browse for output folder…</option>
+        </select>
+      </label>
+      <button type="button" onClick={onBrowse} disabled={busy} title="Browse for a completed SoyRootBio output folder">…</button>
+      <button type="button" onClick={onNewWindow} disabled={busy} title="Open another independent viewer window">+□</button>
+    </div>
+  );
+}
+
+export function DatasetSwitchDialog({
+  outputDir,
+  draftCount,
+  canFinish,
+  onFinish,
+  onDiscard,
+  onCancel,
+}: {
+  outputDir: string;
+  draftCount: number;
+  canFinish: boolean;
+  onFinish: () => void;
+  onDiscard: () => void;
+  onCancel: () => void;
+}) {
+  return (
+    <div className="modal-backdrop" role="presentation" onMouseDown={onCancel}>
+      <section className="confirm-dialog dataset-switch-dialog" role="dialog" aria-modal="true" aria-labelledby="switch-title" onMouseDown={(event) => event.stopPropagation()}>
+        <span className="danger-icon">⇄</span>
+        <p className="error-kicker">UNFINISHED PATH</p>
+        <h2 id="switch-title">Switch to {leafName(outputDir)}?</h2>
+        <p>
+          The current {draftCount}-point path has not been added to the operation
+          log. Finish it, discard it, or keep working in this dataset.
+        </p>
+        <div className="dialog-actions three-actions">
+          <button type="button" className="quiet-button" onClick={onCancel}>Cancel</button>
+          <button type="button" className="danger-button" onClick={onDiscard}>Discard and switch</button>
+          <button type="button" className="primary-button" onClick={onFinish} disabled={!canFinish}>Finish and switch</button>
+        </div>
+      </section>
+    </div>
+  );
+}
+
 export function Toolbar({
   activeTool,
   state,
   busy,
+  readOnly,
   onTool,
   onUndo,
   onRedo,
@@ -110,6 +240,7 @@ export function Toolbar({
   activeTool: ToolMode;
   state: EditorState;
   busy: boolean;
+  readOnly: boolean;
   onTool: (tool: ToolMode) => void;
   onUndo: () => void;
   onRedo: () => void;
@@ -118,8 +249,8 @@ export function Toolbar({
   return (
     <nav className="tool-strip" aria-label="Root editing tools">
       <div className="history-tools">
-        <button className="icon-action" type="button" disabled={busy || !state.can_undo} onClick={onUndo} title="Undo (Ctrl Z)" aria-label="Undo last edit">↶</button>
-        <button className="icon-action" type="button" disabled={busy || !state.can_redo} onClick={onRedo} title="Redo (Ctrl Shift Z)" aria-label="Redo last edit">↷</button>
+        <button className="icon-action" type="button" disabled={busy || readOnly || !state.can_undo} onClick={onUndo} title="Undo (Ctrl Z)" aria-label="Undo last edit">↶</button>
+        <button className="icon-action" type="button" disabled={busy || readOnly || !state.can_redo} onClick={onRedo} title="Redo (Ctrl Shift Z)" aria-label="Redo last edit">↷</button>
       </div>
       <div className="tool-divider" />
       <div className="edit-tools">
@@ -128,7 +259,7 @@ export function Toolbar({
             key={tool.id}
             className={`tool-button ${activeTool === tool.id ? "active" : ""}`}
             type="button"
-            disabled={busy}
+            disabled={busy || (readOnly && tool.id !== "select")}
             onClick={() => onTool(tool.id)}
             title={`${tool.help} Shortcut ${tool.shortcut}`}
             aria-pressed={activeTool === tool.id}
@@ -138,7 +269,7 @@ export function Toolbar({
         ))}
       </div>
       <div className="tool-divider" />
-      <button type="button" className="export-button" onClick={onExport} disabled={busy}>
+      <button type="button" className="export-button" onClick={onExport} disabled={busy || readOnly}>
         <span>⇩</span> Export edits
       </button>
     </nav>
@@ -319,4 +450,8 @@ export function formatMetric(value: number | null, digits = 3): string {
   if (typeof value !== "number" || !Number.isFinite(value)) return "—";
   if (value !== 0 && (Math.abs(value) >= 10000 || Math.abs(value) < 0.001)) return value.toExponential(2);
   return value.toLocaleString(undefined, { maximumFractionDigits: digits, minimumFractionDigits: 0 });
+}
+
+function leafName(path: string): string {
+  return path.split(/[\\/]/).filter(Boolean).at(-1) ?? path;
 }

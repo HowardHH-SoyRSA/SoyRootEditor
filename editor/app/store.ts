@@ -17,6 +17,7 @@ interface EditorUiState {
   meshReady: boolean;
   clientGpu: string | null;
   setServerState: (state: EditorState) => void;
+  replaceDataset: (state: EditorState | null) => void;
   setSelectedRootId: (rootId: string | null) => void;
   setSelectedPatchId: (patchId: string | null) => void;
   setHovered: (hovered: HoverInfo | null) => void;
@@ -64,6 +65,25 @@ export const useEditorStore = create<EditorUiState>((set) => ({
         selectedRootId: stillExists ? current.selectedRootId : null,
         selectedPatchId: patchStillExists ? current.selectedPatchId : null,
       };
+    }),
+  replaceDataset: (serverState) =>
+    set({
+      serverState,
+      selectedRootId: null,
+      selectedPatchId: null,
+      hovered: null,
+      tool: "select",
+      draftPoints: [],
+      focusRequest: null,
+      patchFocusRequest: null,
+      loadProgress: {
+        phase: "idle",
+        progress: 0,
+        message: serverState
+          ? "Preparing the selected dataset"
+          : "Waiting for dataset",
+      },
+      meshReady: false,
     }),
   setSelectedRootId: (selectedRootId) =>
     set({ selectedRootId, selectedPatchId: null }),

@@ -60,6 +60,9 @@ export interface PointPatchRecord {
 
 export interface EditorState {
   schema: string;
+  viewer_id: string;
+  read_only: boolean;
+  read_only_reason: string | null;
   baseline_fingerprint: string;
   source_output_dir: string;
   session_dir: string;
@@ -100,6 +103,12 @@ export interface EditorState {
       full_resolution_policy: string;
     };
   };
+}
+
+export interface ViewerBootstrap {
+  viewer_id: string;
+  state: EditorState | null;
+  recent_datasets: string[];
 }
 
 export interface OperationResponse {

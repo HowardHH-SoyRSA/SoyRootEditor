@@ -6,6 +6,8 @@
 .pytest_cache/
 .pytest-runs/
 .pytest-tmp-editor-tests/
+.pnpm-store/
+.local/
 .tmp_editor_*/
 .mypy_cache/
 .ruff_cache/

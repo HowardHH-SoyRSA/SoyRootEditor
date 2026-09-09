@@ -23,9 +23,8 @@ def build_parser() -> argparse.ArgumentParser:
     )
     editor.add_argument(
         "--output",
-        required=True,
         type=Path,
-        help="SoyRootBio output directory containing the labelled PLY and root hierarchy.",
+        help="Optional initial SoyRootBio output directory; omit it to choose a dataset in the viewer.",
     )
     editor.add_argument(
         "--session-dir",

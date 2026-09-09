@@ -10,17 +10,24 @@ import {
 } from "react";
 import {
   applyEditorOperation,
+  bootstrapViewer,
+  browseDataset,
   exportEdits,
-  fetchEditorState,
   historyAction,
   initialApiBase,
+  initialViewerContext,
   saveApiBase,
+  saveViewerId,
+  switchDataset,
 } from "../lib/api";
 import { useEditorStore } from "../store";
 import type { MeshHit, OperationResponse, RootRecord } from "../types";
 import {
   ConfirmDialog,
   ConnectionScreen,
+  DatasetOpenScreen,
+  DatasetSelector,
+  DatasetSwitchDialog,
   DraftControls,
   HoverTooltip,
   MeshLoading,
@@ -52,6 +59,7 @@ export function RootEditor() {
   const meshReady = useEditorStore((store) => store.meshReady);
   const clientGpu = useEditorStore((store) => store.clientGpu);
   const setServerState = useEditorStore((store) => store.setServerState);
+  const replaceDataset = useEditorStore((store) => store.replaceDataset);
   const setSelectedRootId = useEditorStore((store) => store.setSelectedRootId);
   const setSelectedPatchId = useEditorStore(
     (store) => store.setSelectedPatchId,
@@ -67,6 +75,12 @@ export function RootEditor() {
   );
 
   const [apiBase, setApiBase] = useState(() => initialApiBase());
+  const [initialViewer] = useState(() => initialViewerContext());
+  const viewerRequest = useRef(initialViewer);
+  const [viewerId, setViewerId] = useState(initialViewer.viewerId);
+  const [recentDatasets, setRecentDatasets] = useState<string[]>([]);
+  const [datasetError, setDatasetError] = useState("");
+  const [pendingDataset, setPendingDataset] = useState<string | null>(null);
   const [endpointDraft, setEndpointDraft] = useState(() =>
     typeof window === "undefined"
       ? ""
@@ -147,10 +161,34 @@ export function RootEditor() {
 
   useEffect(() => {
     const controller = new AbortController();
-    fetchEditorState(apiBase, controller.signal)
-      .then((state) => {
-        setServerState(state);
+    bootstrapViewer(
+      apiBase,
+      viewerRequest.current.viewerId,
+      viewerRequest.current.newWindow,
+      controller.signal,
+    )
+      .then(async (payload) => {
+        const requestedDataset = viewerRequest.current.initialDataset;
+        const resolvedPayload =
+          requestedDataset &&
+          payload.state?.source_output_dir !== requestedDataset
+            ? await switchDataset(
+                apiBase,
+                payload.viewer_id,
+                requestedDataset,
+              )
+            : payload;
+        viewerRequest.current = {
+          viewerId: resolvedPayload.viewer_id,
+          newWindow: false,
+          initialDataset: "",
+        };
+        saveViewerId(resolvedPayload.viewer_id);
+        setViewerId(resolvedPayload.viewer_id);
+        setRecentDatasets(resolvedPayload.recent_datasets);
+        replaceDataset(resolvedPayload.state);
         setConnectionState("connected");
+        setConnectionError("");
       })
       .catch((error) => {
         if (error instanceof DOMException && error.name === "AbortError") return;
@@ -162,7 +200,7 @@ export function RootEditor() {
         );
       });
     return () => controller.abort();
-  }, [apiBase, connectNonce, setServerState]);
+  }, [apiBase, connectNonce, replaceDataset]);
 
   const runOperation = useCallback(
     async (
@@ -174,7 +212,16 @@ export function RootEditor() {
       setBusy(true);
       setBusyMessage("Applying edit and recomputing root metrics…");
       try {
-        const response = await applyEditorOperation(apiBase, operationType, args);
+        if (serverState?.read_only) {
+          notify("info", "This duplicate dataset window is read-only.");
+          return null;
+        }
+        const response = await applyEditorOperation(
+          apiBase,
+          viewerId,
+          operationType,
+          args,
+        );
         setServerState(response.state);
         notify("success", message);
         return response;
@@ -186,18 +233,18 @@ export function RootEditor() {
         setBusyMessage("");
       }
     },
-    [apiBase, busy, notify, setServerState],
+    [apiBase, busy, notify, serverState, setServerState, viewerId],
   );
 
   const runHistory = useCallback(
     async (action: "undo" | "redo") => {
-      if (busy) return;
+      if (busy || serverState?.read_only) return;
       setBusy(true);
       setBusyMessage(
         `${action === "undo" ? "Undoing" : "Redoing"} edit and recomputing metrics…`,
       );
       try {
-        const response = await historyAction(apiBase, action);
+        const response = await historyAction(apiBase, viewerId, action);
         setServerState(response.state);
         clearDraft();
         notify("success", action === "undo" ? "Edit undone." : "Edit restored.");
@@ -213,7 +260,9 @@ export function RootEditor() {
       busy,
       clearDraft,
       notify,
+      serverState?.read_only,
       setServerState,
+      viewerId,
     ],
   );
 
@@ -240,6 +289,11 @@ export function RootEditor() {
   const handleHit = useCallback(
     async (hit: MeshHit) => {
       if (!serverState || busy) return;
+      if (serverState.read_only && tool !== "select") {
+        notify("info", "This duplicate dataset window is read-only.");
+        setTool("select");
+        return;
+      }
       if (tool === "select" || tool === "order") {
         setSelectedRootId(hit.rootId);
         return;
@@ -362,10 +416,10 @@ export function RootEditor() {
     ],
   );
 
-  const applyRedraw = useCallback(async () => {
+  const applyRedraw = useCallback(async (): Promise<boolean> => {
     if (!selectedRootId || draftPoints.length < 2) {
       notify("info", "A redrawn path needs at least two points.");
-      return;
+      return false;
     }
     const response = await runOperation(
       "redraw_root",
@@ -376,6 +430,7 @@ export function RootEditor() {
       clearDraft();
       setTool("select");
     }
+    return Boolean(response);
   }, [
     clearDraft,
     draftPoints,
@@ -385,13 +440,13 @@ export function RootEditor() {
     setTool,
   ]);
 
-  const applyCreate = useCallback(async () => {
+  const applyCreate = useCallback(async (): Promise<boolean> => {
     if (!selectedRootId || draftPoints.length < 2) {
       notify(
         "info",
         "Select a parent and draw through at least two unassigned points.",
       );
-      return;
+      return false;
     }
     const response = await runOperation(
       "create_root",
@@ -408,6 +463,7 @@ export function RootEditor() {
       setTool("select");
       setSelectedRootId(newRootId);
     }
+    return Boolean(response);
   }, [
     brushRadius,
     clearDraft,
@@ -452,7 +508,7 @@ export function RootEditor() {
     setBusy(true);
     setBusyMessage("Materialising edited files beside the operation log…");
     try {
-      const path = await exportEdits(apiBase);
+      const path = await exportEdits(apiBase, viewerId);
       notify("success", `Edited files exported to ${path}`);
     } catch (error) {
       notify("error", error instanceof Error ? error.message : String(error));
@@ -460,7 +516,7 @@ export function RootEditor() {
       setBusy(false);
       setBusyMessage("");
     }
-  }, [apiBase, busy, notify]);
+  }, [apiBase, busy, notify, viewerId]);
 
   const handleScale = useCallback(
     (scale: number) => {
@@ -474,6 +530,97 @@ export function RootEditor() {
     (message: string) => notify("error", message),
     [notify],
   );
+
+  const performDatasetSwitch = useCallback(
+    async (outputDir: string) => {
+      if (!viewerId || busy) return;
+      setBusy(true);
+      setDatasetError("");
+      setBusyMessage("Saving current edit history and opening the dataset…");
+      try {
+        const payload = await switchDataset(apiBase, viewerId, outputDir);
+        if (!payload.state) throw new Error("The selected dataset did not open.");
+        scaleInitialized.current = false;
+        replaceDataset(payload.state);
+        setRecentDatasets(payload.recent_datasets);
+        setPendingDataset(null);
+        notify(
+          payload.state.read_only ? "info" : "success",
+          payload.state.read_only
+            ? "Dataset opened read-only because another viewer window is editing it."
+            : `Opened ${leafName(payload.state.source_output_dir)}.`,
+        );
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        setDatasetError(message);
+        if (serverState) notify("error", message);
+      } finally {
+        setBusy(false);
+        setBusyMessage("");
+      }
+    },
+    [apiBase, busy, notify, replaceDataset, serverState, viewerId],
+  );
+
+  const requestDatasetSwitch = useCallback(
+    (outputDir: string) => {
+      if (!outputDir || outputDir === serverState?.source_output_dir) return;
+      if (
+        draftPoints.length > 0 &&
+        (tool === "create" || tool === "redraw")
+      ) {
+        setPendingDataset(outputDir);
+        return;
+      }
+      void performDatasetSwitch(outputDir);
+    },
+    [draftPoints.length, performDatasetSwitch, serverState?.source_output_dir, tool],
+  );
+
+  const handleBrowseDataset = useCallback(async () => {
+    if (!viewerId || busy) return;
+    setBusy(true);
+    setDatasetError("");
+    setBusyMessage("Opening the Windows folder chooser…");
+    let selected: string | null = null;
+    try {
+      selected = await browseDataset(
+        apiBase,
+        viewerId,
+        serverState?.source_output_dir,
+      );
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      setDatasetError(message);
+      if (serverState) notify("error", message);
+    } finally {
+      setBusy(false);
+      setBusyMessage("");
+    }
+    if (selected) requestDatasetSwitch(selected);
+  }, [apiBase, busy, notify, requestDatasetSwitch, serverState, viewerId]);
+
+  const openNewViewerWindow = useCallback(() => {
+    const url = new URL(window.location.href);
+    url.searchParams.set("new-window", "1");
+    window.open(url.toString(), "_blank", "noopener");
+  }, []);
+
+  const finishDraftAndSwitch = useCallback(async () => {
+    if (!pendingDataset) return;
+    const finished =
+      tool === "create" ? await applyCreate() : await applyRedraw();
+    if (finished) await performDatasetSwitch(pendingDataset);
+  }, [applyCreate, applyRedraw, pendingDataset, performDatasetSwitch, tool]);
+
+  const discardDraftAndSwitch = useCallback(() => {
+    if (!pendingDataset) return;
+    const outputDir = pendingDataset;
+    clearDraft();
+    setTool("select");
+    setPendingDataset(null);
+    void performDatasetSwitch(outputDir);
+  }, [clearDraft, pendingDataset, performDatasetSwitch, setTool]);
 
   const handleEndpointSubmit = (event: FormEvent) => {
     event.preventDefault();
@@ -513,13 +660,18 @@ export function RootEditor() {
       const selectedTool = TOOLS.find(
         (candidate) => candidate.shortcut === event.key,
       );
-      if (selectedTool) setTool(selectedTool.id);
+      if (
+        selectedTool &&
+        (!serverState?.read_only || selectedTool.id === "select")
+      ) {
+        setTool(selectedTool.id);
+      }
     };
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [clearDraft, runHistory, setTool]);
+  }, [clearDraft, runHistory, serverState?.read_only, setTool]);
 
-  if (connectionState !== "connected" || !serverState) {
+  if (connectionState !== "connected") {
     return (
       <ConnectionScreen
         state={connectionState}
@@ -535,6 +687,19 @@ export function RootEditor() {
           setEndpointDraft(window.location.origin);
           setConnectNonce((value) => value + 1);
         }}
+      />
+    );
+  }
+
+  if (!serverState) {
+    return (
+      <DatasetOpenScreen
+        recentDatasets={recentDatasets}
+        busy={busy}
+        error={datasetError}
+        onBrowse={() => void handleBrowseDataset()}
+        onOpen={requestDatasetSwitch}
+        onNewWindow={openNewViewerWindow}
       />
     );
   }
@@ -563,12 +728,26 @@ export function RootEditor() {
           </div>
           <div><strong>SoyRoot Studio</strong><span>3D graph editor</span></div>
         </div>
-        <div className="dataset-heading" title={serverState.source_output_dir}>
-          <span>ACTIVE DATASET</span><strong>{sampleName}</strong>
+        <div className="dataset-area">
+          <div className="dataset-heading" title={serverState.source_output_dir}>
+            <span>ACTIVE DATASET</span><strong>{sampleName}</strong>
+          </div>
+          <DatasetSelector
+            currentPath={serverState.source_output_dir}
+            recentDatasets={recentDatasets}
+            busy={busy}
+            onSelect={requestDatasetSwitch}
+            onBrowse={() => void handleBrowseDataset()}
+            onNewWindow={openNewViewerWindow}
+          />
         </div>
         <div className="header-status">
-          <div className="status-chip immutable-chip" title="Automatic output files are read-only">
-            <span className="lock-glyph">▣</span>Source preserved
+          <div
+            className={`status-chip immutable-chip ${serverState.read_only ? "read-only-chip" : ""}`}
+            title={serverState.read_only_reason ?? "Automatic output files are read-only"}
+          >
+            <span className="lock-glyph">▣</span>
+            {serverState.read_only ? "Read-only duplicate" : "Source preserved"}
           </div>
           <div className="status-chip gpu-chip" title={hardwareAudit}>
             <span className="live-dot" />{compactGpuName(gpuName)}
@@ -583,6 +762,7 @@ export function RootEditor() {
         activeTool={tool}
         state={serverState}
         busy={busy}
+        readOnly={serverState.read_only}
         onTool={setTool}
         onUndo={() => void runHistory("undo")}
         onRedo={() => void runHistory("redo")}
@@ -607,6 +787,7 @@ export function RootEditor() {
 
         <section className="viewport-region" aria-label="3D viewport">
           <RootViewport
+            key={`${viewerId}:${serverState.baseline_fingerprint}`}
             apiBase={apiBase}
             state={serverState}
             interactionLocked={busy || !meshReady}
@@ -617,7 +798,7 @@ export function RootEditor() {
           />
           <ToolGuidance tool={toolDefinition} />
           {!meshReady ? <MeshLoading progress={loadProgress} /> : null}
-          {tool === "redraw" || tool === "create" ? (
+          {!serverState.read_only && (tool === "redraw" || tool === "create") ? (
             <DraftControls
               mode={tool}
               count={draftPoints.length}
@@ -641,7 +822,7 @@ export function RootEditor() {
               roots={serverState.roots}
               activeTool={tool}
               brushRadius={brushRadius}
-              busy={busy}
+              busy={busy || serverState.read_only}
               onBrushRadius={setBrushRadius}
               onApplyOrder={(order) => void applyOrder(order)}
               onSelect={selectAndFocus}
@@ -651,7 +832,7 @@ export function RootEditor() {
       </section>
 
       <footer className="app-footer">
-        <span><i className="footer-dot" />Full-resolution session</span>
+        <span><i className="footer-dot" />{serverState.read_only ? "Full-resolution read-only view" : "Full-resolution editing session"}</span>
         <span>{serverState.mesh.face_count.toLocaleString()} faces</span>
         <span>History is append-only · <kbd>Ctrl Z</kbd> undo · <kbd>Ctrl Shift Z</kbd> redo</span>
         <span className="fingerprint" title={serverState.baseline_fingerprint}>{serverState.baseline_fingerprint.slice(0, 19)}…</span>
@@ -670,6 +851,17 @@ export function RootEditor() {
 
       {deleteCandidate ? (
         <ConfirmDialog root={deleteCandidate} onCancel={() => setDeleteCandidate(null)} onConfirm={() => void confirmDelete()} />
+      ) : null}
+
+      {pendingDataset ? (
+        <DatasetSwitchDialog
+          outputDir={pendingDataset}
+          draftCount={draftPoints.length}
+          canFinish={draftPoints.length >= 2 && Boolean(selectedRoot)}
+          onFinish={() => void finishDraftAndSwitch()}
+          onDiscard={discardDraftAndSwitch}
+          onCancel={() => setPendingDataset(null)}
+        />
       ) : null}
 
       <div className="toast-stack" aria-live="polite">

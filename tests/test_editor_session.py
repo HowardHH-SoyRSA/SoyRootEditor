@@ -3,6 +3,7 @@ from __future__ import annotations
 from hashlib import sha256
 import json
 from pathlib import Path
+import shutil
 import xml.etree.ElementTree as ET
 
 import numpy as np
@@ -545,6 +546,107 @@ def test_local_editor_api_serves_full_mesh_labels_and_history(
         json={"target_dir": str(editor_bundle.parent / "outside-session")},
     )
     assert outside_export.status_code == 400
+
+
+def test_dataset_switch_closes_the_saved_previous_session(
+    editor_bundle: Path,
+) -> None:
+    second_bundle = editor_bundle.parent / "second-output"
+    shutil.copytree(editor_bundle, second_bundle)
+    app = create_editor_app(editor_bundle)
+    client = app.test_client()
+    client.get("/")
+    bootstrap = client.post("/api/viewers", json={}).json
+    viewer_id = bootstrap["viewer_id"]
+    headers = {"X-SoyRoot-Viewer": viewer_id}
+    previous = app.config["EDITOR_MANAGER"].session_for(viewer_id)
+
+    edit = client.post(
+        "/api/operations",
+        headers=headers,
+        json={
+            "type": "assign_points",
+            "arguments": {"root_id": "root-a", "indices": [17]},
+        },
+    )
+    assert edit.status_code == 200
+    switched = client.post(
+        "/api/datasets/switch",
+        headers=headers,
+        json={"output_dir": str(second_bundle)},
+    )
+
+    assert switched.status_code == 200
+    assert previous.closed is True
+    assert previous.log_path.read_text(encoding="utf-8").endswith("\n")
+    assert switched.json["state"]["source_output_dir"] == str(
+        second_bundle.resolve()
+    )
+    assert switched.json["state"]["read_only"] is False
+    assert f"viewer={viewer_id}" in switched.json["state"]["mesh"]["url"]
+
+
+def test_failed_dataset_switch_keeps_the_previous_session_open(
+    editor_bundle: Path,
+) -> None:
+    incomplete = editor_bundle.parent / "incomplete-output"
+    incomplete.mkdir()
+    app = create_editor_app(editor_bundle)
+    client = app.test_client()
+    client.get("/")
+    viewer_id = client.post("/api/viewers", json={}).json["viewer_id"]
+    headers = {"X-SoyRoot-Viewer": viewer_id}
+    previous = app.config["EDITOR_MANAGER"].session_for(viewer_id)
+
+    response = client.post(
+        "/api/datasets/switch",
+        headers=headers,
+        json={"output_dir": str(incomplete)},
+    )
+
+    assert response.status_code == 404
+    assert previous.closed is False
+    state = client.get("/api/state", headers=headers).json
+    assert state["source_output_dir"] == str(editor_bundle.resolve())
+
+
+def test_multiple_viewers_are_independent_and_duplicate_logs_are_read_only(
+    editor_bundle: Path,
+) -> None:
+    second_bundle = editor_bundle.parent / "second-output"
+    shutil.copytree(editor_bundle, second_bundle)
+    app = create_editor_app(editor_bundle)
+    client = app.test_client()
+    client.get("/")
+    first = client.post("/api/viewers", json={}).json
+    second = client.post("/api/viewers", json={"new_window": True}).json
+    assert second["state"] is None
+
+    second_open = client.post(
+        "/api/datasets/switch",
+        headers={"X-SoyRoot-Viewer": second["viewer_id"]},
+        json={"output_dir": str(second_bundle)},
+    )
+    assert second_open.status_code == 200
+    assert second_open.json["state"]["read_only"] is False
+    assert first["state"]["source_output_dir"] != second_open.json["state"][
+        "source_output_dir"
+    ]
+
+    duplicate = client.post("/api/viewers", json={"new_window": True}).json
+    duplicate_open = client.post(
+        "/api/datasets/switch",
+        headers={"X-SoyRoot-Viewer": duplicate["viewer_id"]},
+        json={"output_dir": str(editor_bundle)},
+    )
+    assert duplicate_open.status_code == 200
+    assert duplicate_open.json["state"]["read_only"] is True
+    rejected = client.post(
+        "/api/undo",
+        headers={"X-SoyRoot-Viewer": duplicate["viewer_id"]},
+    )
+    assert rejected.status_code == 400
+    assert "read-only" in rejected.json["error"]
 
 
 def test_assignment_drag_is_one_resolved_undoable_operation(

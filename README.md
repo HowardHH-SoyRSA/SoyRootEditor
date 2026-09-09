@@ -94,6 +94,21 @@ Open any completed SoyRootBio output bundle with one command:
 soyrootbio editor --output "D:\results\sample"
 ```
 
+Run `soyrootbio editor` without `--output`, or use the installed desktop
+shortcut, to start with the Windows dataset-folder chooser. The **Dataset**
+control beside the active-dataset heading switches among recent bundles or
+opens another folder. The replacement bundle is fully validated before the
+current operation log is flushed and closed; a failed switch leaves the
+current dataset open. An unfinished Create or Redraw path must be finished,
+discarded, or retained by cancelling the switch.
+
+Use **Open another viewer window** to inspect or edit several datasets through
+one local service. Each window keeps an independent dataset, camera, selection,
+and undo/redo history. If the same edit-session directory is already writable
+in another window, the duplicate opens read-only to protect the append-only
+operation log. Every full-resolution window uses additional system and GPU
+memory.
+
 The command starts a loopback-only local server and opens the editor in the browser. The viewer downloads and parses `segmented_root_structure.ply` off the UI thread, retains every vertex and face, requests the browser's high-performance GPU, computes smooth normals in a worker, and builds a background BVH for fast picking. It does not downsample the result. The status area reports the detected host GPU, the browser WebGL renderer, vertex/face counts, and full-resolution state.
 
 Hovering the surface shows root ID, length, mean diameter, and tip–gravity angle. Selecting a root from the surface or hierarchy highlights its complete centreline, direct parent, direct children, insertion point, and tip, then frames the full path in the 3D view. The hierarchy also lists every triangle-connected uncertain and unassigned mesh patch for direct highlighting, framing, and patch-level inspection. The inspector shows path and chord length, all three directional angles, mean diameter, surface area, volume, tortuosity, parent ID, and a direct-children list that is collapsed by default.

@@ -53,13 +53,12 @@ if ($CreateDesktopShortcut) {
     $shortcutPath = Join-Path $desktop 'SoyRootEditor.lnk'
     $shell = New-Object -ComObject WScript.Shell
     $shortcut = $shell.CreateShortcut($shortcutPath)
-    $shortcut.TargetPath = Join-Path $InstallDirectory 'Launch-SoyRootBio-GUI.cmd'
+    $shortcut.TargetPath = Join-Path $InstallDirectory 'Launch-SoyRootEditor.cmd'
     $shortcut.WorkingDirectory = $InstallDirectory
-    $shortcut.Description = 'SoyRootEditor 3D viewer and editor'
+    $shortcut.Description = 'Open the SoyRootEditor 3D viewer and editor'
     $shortcut.Save()
 }
 
 Write-Output "Installed to: $InstallDirectory"
 Write-Output "GUI launcher: $(Join-Path $InstallDirectory 'Launch-SoyRootBio-GUI.cmd')"
 Write-Output "Editor launcher: $(Join-Path $InstallDirectory 'Launch-SoyRootEditor.cmd')"
-

@@ -37,13 +37,15 @@ body {
 
 body,
 button,
-input {
+input,
+select {
   font-family:
     Inter, "Segoe UI Variable", "Segoe UI", Helvetica, Arial, sans-serif;
 }
 
 button,
-input {
+input,
+select {
   font: inherit;
 }
 
@@ -53,6 +55,7 @@ button {
 
 button:focus-visible,
 input:focus-visible,
+select:focus-visible,
 summary:focus-visible,
 canvas:focus-visible {
   outline: 2px solid var(--mint);
@@ -75,7 +78,7 @@ button:disabled {
 
 .app-header {
   display: grid;
-  grid-template-columns: minmax(210px, 0.8fr) minmax(250px, 1.35fr) minmax(420px, 1fr);
+  grid-template-columns: minmax(210px, 0.75fr) minmax(430px, 1.5fr) minmax(390px, 1fr);
   align-items: center;
   padding: 0 18px;
   border-bottom: 1px solid var(--line);
@@ -83,6 +86,15 @@ button:disabled {
     linear-gradient(90deg, rgba(55, 134, 108, 0.08), transparent 35%),
     var(--ink-900);
   z-index: 10;
+}
+
+.dataset-area {
+  min-width: 0;
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 9px;
 }
 
 .brand-lockup,
@@ -158,10 +170,59 @@ button:disabled {
 
 .dataset-heading {
   min-width: 0;
-  justify-self: center;
-  width: min(100%, 520px);
-  padding: 0 22px;
+  flex: 1 1 180px;
+  padding: 0 10px 0 18px;
   border-left: 1px solid var(--line);
+}
+
+.dataset-selector {
+  min-width: 0;
+  display: flex;
+  align-items: flex-end;
+  gap: 4px;
+}
+
+.dataset-selector label {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.dataset-selector label > span {
+  color: var(--text-dim);
+  font-size: 8px;
+  letter-spacing: 0.13em;
+}
+
+.dataset-selector select {
+  width: 210px;
+  height: 30px;
+  padding: 0 27px 0 8px;
+  border: 1px solid var(--line-strong);
+  background: #0a1512;
+  color: #c7d9d2;
+  font-family: "Cascadia Code", Consolas, monospace;
+  font-size: 9px;
+}
+
+.dataset-selector > button {
+  width: 30px;
+  height: 30px;
+  border: 1px solid var(--line-strong);
+  background: var(--ink-850);
+  color: var(--mint-soft);
+  cursor: pointer;
+}
+
+.dataset-selector > button:hover {
+  border-color: rgba(81, 238, 190, 0.35);
+  background: #192a24;
+}
+
+.read-only-chip {
+  border-color: rgba(255, 181, 88, 0.28);
+  color: var(--amber);
 }
 
 .dataset-heading span {
@@ -1844,6 +1905,14 @@ kbd {
   margin-top: 20px;
 }
 
+.dialog-actions.three-actions {
+  flex-wrap: wrap;
+}
+
+.dataset-switch-dialog {
+  width: min(520px, 100%);
+}
+
 .danger-button {
   border-color: rgba(255, 116, 117, 0.36);
   background: rgba(255, 116, 117, 0.11);
@@ -2032,6 +2101,73 @@ kbd {
   line-height: 1.5;
 }
 
+.dataset-open-actions {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 9px;
+  padding: 34px;
+}
+
+.dataset-error {
+  margin: 4px 0;
+  color: #ff9b9c;
+  font-size: 9px;
+  line-height: 1.5;
+}
+
+.recent-datasets {
+  min-width: 0;
+  max-height: 190px;
+  display: grid;
+  gap: 5px;
+  margin-top: 8px;
+  overflow-y: auto;
+}
+
+.recent-datasets > span {
+  color: var(--text-dim);
+  font-size: 8px;
+  letter-spacing: 0.14em;
+}
+
+.recent-datasets button {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  padding: 8px 9px;
+  border: 1px solid var(--line);
+  background: rgba(81, 238, 190, 0.025);
+  cursor: pointer;
+}
+
+.recent-datasets button:hover {
+  border-color: var(--line-strong);
+  background: rgba(81, 238, 190, 0.06);
+}
+
+.recent-datasets strong,
+.recent-datasets small {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.recent-datasets strong {
+  color: #c6d8d1;
+  font-size: 10px;
+}
+
+.recent-datasets small {
+  margin-top: 3px;
+  color: var(--text-dim);
+  font-family: "Cascadia Code", Consolas, monospace;
+  font-size: 7px;
+}
+
 @keyframes spin {
   to { transform: rotate(360deg); }
 }
@@ -2043,7 +2179,11 @@ kbd {
   }
 
   .app-header {
-    grid-template-columns: 200px minmax(190px, 1fr) 360px;
+    grid-template-columns: 190px minmax(320px, 1fr) 330px;
+  }
+
+  .dataset-heading {
+    display: none;
   }
 
   .immutable-chip {
@@ -2065,7 +2205,7 @@ kbd {
   }
 
   .app-header {
-    grid-template-columns: 180px minmax(0, 1fr) auto;
+    grid-template-columns: 180px minmax(260px, 1fr) auto;
   }
 
   .gpu-chip,
@@ -2124,13 +2264,16 @@ kbd {
 }
 
 @media (max-width: 640px) {
-  .dataset-heading {
-    border: 0;
-    padding: 0 8px;
-  }
-
   .app-header {
     grid-template-columns: 145px minmax(0, 1fr);
+  }
+
+  .dataset-selector select {
+    width: min(170px, calc(100vw - 245px));
+  }
+
+  .dataset-selector > button:first-of-type {
+    display: none;
   }
 
   .header-status {

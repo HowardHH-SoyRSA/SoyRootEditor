@@ -15,6 +15,7 @@ source snapshot. Dates are repository commit dates in China Standard Time.
 | 2026-09-03 | `2c60cd8` | Enforced hierarchy-length constraints and cleaned primary surface patches. |
 | 2026-09-05 | `4caf010` | Added reusable guidance snapshots and runtime reporting. |
 | 2026-09-08 | `f1ec9aa` | Preserved adjacent-root surface tracking and its regression tests. |
+| 2026-09-09 | Working tree | Added desktop viewer launch, transactional dataset switching, recent datasets, and independent multi-window sessions. |
 
 ## Current feature status
 
@@ -32,10 +33,12 @@ The viewer/editor line is implemented and covered by automated tests:
   hashed point-selection blobs, and materialised PLY/JSON/CSV/RSML exports.
 - Loopback-only Python API with a same-site session token and protected export
   paths.
+- Desktop viewer shortcut, in-viewer dataset selection, log-safe switching,
+  multi-window editing, and read-only protection for duplicate sessions.
 
 ## Verification at this snapshot
 
-- Python test suite: 210 tests passed.
+- Python test suite: 224 tests passed.
 - Editor TypeScript typecheck: passed.
 - Static Vite build: passed.
 - Rendered editor checks: 11 tests passed.
@@ -48,4 +51,3 @@ The viewer/editor line is implemented and covered by automated tests:
 - Reduce the approximately 890 KB minified editor entry chunk through code
   splitting when packaging performance becomes a priority.
 - Validate very large meshes on a range of integrated and discrete GPUs.
-
