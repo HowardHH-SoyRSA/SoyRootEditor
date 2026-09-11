@@ -35,10 +35,14 @@ twice produces a read-only duplicate, preventing concurrent log writes.
 - Use the search field to find a root or patch.
 - Use ordinary left-dragging to orbit and the wheel/trackpad to zoom.
 - The initial orbit target is the geometric centre of the primary root.
+- In Inspect mode, cyan rings mark graph junctions. Hover to see the parent,
+  child arms, centreline-node index and source coordinates; click to open the
+  junction inspector. Rings are an x-ray overlay visible through root surfaces,
+  not a depth measurement. A root's inspector also lists its junction sites.
 
 ## Edit the graph
 
-The toolbar and shortcuts expose nine operations:
+The toolbar and shortcuts expose these tools:
 
 | Operation | Shortcut | Purpose |
 | --- | --- | --- |
@@ -56,6 +60,39 @@ The toolbar and shortcuts expose nine operations:
 In Assign mode, **Shift + left-drag** paints one continuous, atomic brush
 operation. A normal left-drag continues to orbit the model. `Ctrl+Z` and
 `Ctrl+Shift+Z` undo and redo accepted edits.
+
+### Correct the parent continuation at a junction
+
+1. Choose **Inspect** (`1`) and click a cyan junction ring (or a junction in
+   the selected root's inspector).
+2. Choose the child arm that should instead continue the parent. At a
+   multi-child junction, only this chosen arm is exchanged.
+3. Click **Switch parent / child arms**. The camera does not move.
+
+This exchanges outgoing arms, not just names or parent-ID fields. The proximal
+parent path and its root ID are retained, and its centreline continues along
+the chosen child arm. The previous parent continuation takes the child's ID.
+Roots attached to either outgoing arm follow that physical arm; roots attached
+before or exactly at the junction remain on the proximal parent. Exact graph
+attachment indices are remapped, avoiding nearest-point jumps at self-contacts.
+
+Parent/child links, downstream orders, surface-point ownership and measurements
+are updated in one `swap_junction_branches` operation. Affected child-subtree
+manual order overrides are cleared; unrelated overrides are preserved.
+Point ownership uses the same nearest-centreline-node partition as Split, with
+junction ties retained by the proximal parent. Uncertain/unassigned points are
+not claimed. Review surface assignments near crowded contacts after a swap.
+
+The primary root can participate, but keeps its basal point, ID and order 0.
+Terminal attachments without a parent continuation cannot be exchanged. Existing
+topology and child-length constraints still apply: an invalid switch is rejected
+atomically with a reason, leaving the prior result and log unchanged.
+Undo/redo and saved-log replay restore the complete correction, and edited
+PLY/JSON/CSV/RSML exports include the corrected graph. Older software versions
+cannot replay this new operation; keep the updated viewer with these sessions.
+
+After updating the source installation, restart the local viewer server (not
+just the browser tab) to load the new operation handler.
 
 ## Data safety and export
 
@@ -83,3 +120,5 @@ The viewer inherits the colours written by SoyRootBio exports:
 | Higher order (O4+) | `#F2A614` |
 | Uncertain | `#FA7A0D` |
 | Unassigned | `#8C8C8C` |
+
+Cyan junction rings are a viewer-only overlay; exported root colours are unchanged.

@@ -212,6 +212,7 @@ class EditorSession:
                 },
                 "roots": roots,
                 "root_count": len(roots),
+                "junctions": self._junctions_public(),
                 "point_patches": point_patches,
                 "point_patch_count": len(point_patches),
                 "can_undo": bool(self._history),
@@ -227,6 +228,7 @@ class EditorSession:
                     "delete_root",
                     "redraw_root",
                     "correct_root_order",
+                    "swap_junction_branches",
                 ],
                 "hardware": self._hardware_public(),
             }
@@ -588,12 +590,16 @@ class EditorSession:
                 "delete_root": self._delete_root,
                 "redraw_root": self._redraw_root,
                 "correct_root_order": self._correct_root_order,
+                "swap_junction_branches": self._swap_junction_branches,
             }
             action = dispatcher.get(operation.type)
             if action is None:
                 raise EditorValidationError(f"Unsupported editor operation: {operation.type}")
             action(operation)
-            self._refresh_attachments()
+            # A junction splice maps exact graph indices; a new nearest-point
+            # search could jump to a different node at a self-contact.
+            if operation.type != "swap_junction_branches":
+                self._refresh_attachments()
             self._validate_state()
             self._recompute_traits()
         except Exception:
@@ -770,6 +776,79 @@ class EditorSession:
             "insertion_index": insertion_index,
             "position": insertion_point.tolist(),
         }
+
+    def _swap_junction_branches(self, operation: Operation) -> None:
+        """Exchange outgoing arms, keeping the basal parent identity in place.
+
+        A parent is a continuous path, not just the segment before the fork.
+        Exchanging parent_id fields would create a cycle. Instead splice the
+        child arm onto the proximal parent and give its old distal arm to the
+        child. Classify existing attachments before changing either path.
+        """
+        parent = self._root(str(operation.arguments.get("parent_id", "")))
+        child = self._root(str(operation.arguments.get("child_id", "")))
+        if child.parent_id != parent.root_id or child.insertion_index is None:
+            raise EditorValidationError("Select a direct child at this parent junction.")
+        index = int(child.insertion_index)
+        expected_index = operation.arguments.get("insertion_index")
+        if expected_index is None or expected_index != index:
+            raise EditorValidationError("The junction has changed. Select it again before switching.")
+        if index >= len(parent.points) - 1:
+            raise EditorValidationError("This terminal attachment has no parent continuation to exchange.")
+        proximal = parent.points[: index + 1].copy()
+        distal = parent.points[index:].copy()
+        child_arm = child.points.copy()
+        if path_length(distal) <= 1e-12 or path_length(child_arm) <= 1e-12:
+            raise EditorValidationError("Both outgoing junction arms must have nonzero length.")
+
+        children = self._children_map()
+        moved_to_parent = list(children.get(child.root_id, []))
+        moved_to_child = [
+            root_id for root_id in children.get(parent.root_id, [])
+            if root_id != child.root_id
+            and self.roots[root_id].insertion_index is not None
+            and self.roots[root_id].insertion_index > index
+        ]
+        affected = {child.root_id}
+        queue = moved_to_parent + moved_to_child
+        while queue:
+            root_id = queue.pop()
+            if root_id not in affected:
+                affected.add(root_id)
+                queue.extend(children.get(root_id, []))
+
+        # Snapshot memberships before relabeling so each point moves only once.
+        # Match split_root's nearest-centerline partition; junction ties stay
+        # with the proximal parent, and uncertain/unassigned points are untouched.
+        parent_indices = np.flatnonzero(self.mesh.root_labels == parent.numeric_label)
+        child_indices = np.flatnonzero(self.mesh.root_labels == child.numeric_label)
+        if len(parent_indices):
+            positions = self.mesh.positions[parent_indices]
+            proximal_distance = cKDTree(proximal).query(positions)[0]
+            distal_distance = cKDTree(distal).query(positions)[0]
+            self._set_labels(parent_indices[distal_distance < proximal_distance], child.numeric_label)
+        self._set_labels(child_indices, parent.numeric_label)
+
+        parent.points = np.vstack((proximal, child_arm[1:]))
+        child.points = distal
+        for root_id in moved_to_parent:
+            root = self.roots[root_id]
+            root.parent_id = parent.root_id
+            root.insertion_index = index + int(root.insertion_index)
+        for root_id in moved_to_child:
+            root = self.roots[root_id]
+            root.parent_id = child.root_id
+            root.insertion_index = int(root.insertion_index) - index
+        provenance = sorted(set(parent.source_root_ids + child.source_root_ids + [parent.root_id, child.root_id]))
+        parent.source_root_ids = provenance.copy()
+        child.source_root_ids = provenance.copy()
+        for root_id in affected | {parent.root_id}:
+            root = self.roots[root_id]
+            root.confidence = 0.0
+            root.qc_flags = sorted(set(root.qc_flags + ["manual_junction_swap"]))
+            if root_id != parent.root_id:
+                root.order_overridden = False
+        self._recalculate_descendant_orders(parent.root_id, preserve_root=True)
 
     def _split_root(self, operation: Operation) -> None:
         args = operation.arguments
@@ -1797,6 +1876,28 @@ class EditorSession:
                 path.unlink(missing_ok=True)
             except OSError:
                 pass
+
+    def _junctions_public(self) -> list[dict[str, Any]]:
+        junctions: dict[tuple[str, int], dict[str, Any]] = {}
+        for child in sorted(self.roots.values(), key=lambda root: root.root_id):
+            if child.parent_id is None or child.insertion_index is None:
+                continue
+            parent = self.roots[child.parent_id]
+            index = int(child.insertion_index)
+            key = (parent.root_id, index)
+            if key not in junctions:
+                can_swap = index < len(parent.points) - 1 and path_length(parent.points[index:]) > 1e-12
+                junctions[key] = {
+                    "junction_id": f"junction:{parent.root_id}:{index}",
+                    "parent_id": parent.root_id,
+                    "insertion_index": index,
+                    "position": parent.points[index].tolist(),
+                    "child_ids": [],
+                    "can_swap": can_swap,
+                    "disabled_reason": None if can_swap else "No parent continuation at this terminal attachment.",
+                }
+            junctions[key]["child_ids"].append(child.root_id)
+        return [junctions[key] for key in sorted(junctions)]
 
     def _root_public(self, root: RootNode, children: list[str]) -> dict[str, Any]:
         trait = root.traits

@@ -6,7 +6,7 @@ import {
   rgbToCss,
   rootOrderCssColor,
 } from "../lib/rootColors";
-import type { PointPatchRecord, RootRecord, ToolMode } from "../types";
+import type { JunctionRecord, PointPatchRecord, RootRecord, ToolMode } from "../types";
 import { formatMetric } from "./EditorChrome";
 
 export function RootDetails({
@@ -19,6 +19,8 @@ export function RootDetails({
   onBrushRadius,
   onApplyOrder,
   onSelect,
+  junctions,
+  onSelectJunction,
 }: {
   root: RootRecord | null;
   patch: PointPatchRecord | null;
@@ -29,6 +31,8 @@ export function RootDetails({
   onBrushRadius: (radius: number) => void;
   onApplyOrder: (order: number) => void;
   onSelect: (rootId: string) => void;
+  junctions: JunctionRecord[];
+  onSelectJunction: (junctionId: string) => void;
 }) {
   if (patch) {
     return <PointPatchDetails patch={patch} editTarget={root} />;
@@ -123,6 +127,18 @@ export function RootDetails({
               onApplyOrder={onApplyOrder}
             />
           ) : null}
+        </section>
+      ) : null}
+
+      {activeTool === "select" ? (
+        <section className="metric-section">
+          <span className="section-label">JUNCTION SITES</span>
+          {junctions.filter((junction) => junction.parent_id === root.root_id || junction.child_ids.includes(root.root_id)).map((junction) => (
+            <button type="button" className="junction-link" key={junction.junction_id} onClick={() => onSelectJunction(junction.junction_id)}>
+              ◉ {junction.parent_id} · node {junction.insertion_index}<br />
+              <small>{junction.child_ids.join(", ")}</small>
+            </button>
+          ))}
         </section>
       ) : null}
 

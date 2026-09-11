@@ -23,7 +23,7 @@ export interface ToolDefinition {
 }
 
 export const TOOLS: ToolDefinition[] = [
-  { id: "select", label: "Inspect", mark: "⌖", shortcut: "1", help: "Click a surface or hierarchy item to select, highlight, and frame its root." },
+  { id: "select", label: "Inspect", mark: "⌖", shortcut: "1", help: "Click a root to highlight and frame it. Hover or click a cyan junction ring to inspect or switch branch identities." },
   { id: "create", label: "Create", mark: "+", shortcut: "0", help: "Select a parent root, then draw through two or more grey unassigned points." },
   { id: "split", label: "Split", mark: "⑂", shortcut: "2", help: "Click inside a root to split its centerline at the nearest path point." },
   { id: "merge", label: "Merge", mark: "⋈", shortcut: "3", help: "Select the root to keep, then click a locally connected root with compatible direction." },

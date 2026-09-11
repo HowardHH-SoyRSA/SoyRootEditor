@@ -384,6 +384,7 @@ def test_public_state_exposes_full_metrics_relationships_and_gpu_policy(
         "delete_root",
         "redraw_root",
         "correct_root_order",
+        "swap_junction_branches",
     ]
     assert state["hardware"]["discrete_gpu_present"] is True
     assert state["hardware"]["gpus"][0]["name"] == "Test discrete GPU"
@@ -752,6 +753,10 @@ def test_assignment_drag_is_one_resolved_undoable_operation(
             "correct_root_order",
             {"root_id": "root-c", "root_order": 3},
         ),
+        (
+            "swap_junction_branches",
+            {"parent_id": "root-a", "child_id": "root-c", "insertion_index": 1},
+        ),
     ],
     ids=[
         "create-root",
@@ -763,6 +768,7 @@ def test_assignment_drag_is_one_resolved_undoable_operation(
         "delete",
         "redraw",
         "root-order-correction",
+        "junction-swap",
     ],
 )
 def test_all_editor_operations_have_exact_undo_and_redo(

@@ -31,6 +31,7 @@ interface RootViewportProps {
   state: EditorState;
   interactionLocked: boolean;
   onHit: (hit: MeshHit) => void;
+  onJunction: (junctionId: string) => void;
   onStroke: (hits: MeshHit[]) => void;
   onError: (message: string) => void;
   onScaleChange: (scale: number) => void;
@@ -53,6 +54,7 @@ interface ViewRuntime {
   surfaceColors: Uint8Array | null;
   lineGroup: THREE.Group;
   relationGroup: THREE.Group;
+  junctionGroup: THREE.Group;
   lineMaterials: LineMaterial[];
   grid: THREE.GridHelper;
   renderOrigin: THREE.Vector3;
@@ -76,6 +78,7 @@ export function RootViewport({
   state,
   interactionLocked,
   onHit,
+  onJunction,
   onStroke,
   onError,
   onScaleChange,
@@ -86,6 +89,9 @@ export function RootViewport({
   const handledPatchFocusNonceRef = useRef(0);
   const selectedRootId = useEditorStore((store) => store.selectedRootId);
   const selectedPatchId = useEditorStore((store) => store.selectedPatchId);
+  const selectedJunctionId = useEditorStore((store) => store.selectedJunctionId);
+  const hoveredJunctionId = useEditorStore((store) => store.hoveredJunction?.junctionId);
+  const setHoveredJunction = useEditorStore((store) => store.setHoveredJunction);
   const activeTool = useEditorStore((store) => store.tool);
   const draftPoints = useEditorStore((store) => store.draftPoints);
   const focusRequest = useEditorStore((store) => store.focusRequest);
@@ -96,6 +102,7 @@ export function RootViewport({
     state,
     interactionLocked,
     onHit,
+    onJunction,
     onStroke,
     onError,
     activeTool,
@@ -105,17 +112,69 @@ export function RootViewport({
       state,
       interactionLocked,
       onHit,
+      onJunction,
       onStroke,
       onError,
       activeTool,
     };
-  }, [activeTool, interactionLocked, onError, onHit, onStroke, state]);
+  }, [activeTool, interactionLocked, onError, onHit, onJunction, onStroke, state]);
 
   const setHovered = useEditorStore((store) => store.setHovered);
   const setLoadProgress = useEditorStore((store) => store.setLoadProgress);
   const setMeshReady = useEditorStore((store) => store.setMeshReady);
   const setClientGpu = useEditorStore((store) => store.setClientGpu);
   const meshReady = useEditorStore((store) => store.meshReady);
+
+  useEffect(() => {
+    const runtime = runtimeRef.current;
+    if (!runtime) return;
+    disposeGroup(runtime.junctionGroup);
+    runtime.renderRequested = true;
+    if (activeTool !== "select" || !meshReady) return;
+    const junctions = state.junctions ?? [];
+    const positions: number[] = [];
+    const sizes: number[] = [];
+    const colors: number[] = [];
+    for (const junction of junctions) {
+      positions.push(...new THREE.Vector3().fromArray(junction.position).sub(runtime.renderOrigin).toArray());
+      const active = junction.junction_id === selectedJunctionId || junction.junction_id === hoveredJunctionId;
+      sizes.push(active ? 18 : 10);
+      colors.push(...new THREE.Color(active ? 0xffffff : 0x66d9ff).toArray());
+    }
+    const geometry = new THREE.BufferGeometry();
+    geometry.setAttribute("position", new THREE.Float32BufferAttribute(positions, 3));
+    geometry.setAttribute("markerSize", new THREE.Float32BufferAttribute(sizes, 1));
+    geometry.setAttribute("color", new THREE.Float32BufferAttribute(colors, 3));
+    const material = new THREE.ShaderMaterial({
+      uniforms: { pixelRatio: { value: runtime.renderer.getPixelRatio() } },
+      vertexColors: true,
+      depthTest: false,
+      depthWrite: false,
+      transparent: true,
+      vertexShader: `
+        attribute float markerSize;
+        uniform float pixelRatio;
+        varying vec3 markerColor;
+        void main() {
+          markerColor = color;
+          gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+          gl_PointSize = markerSize * pixelRatio;
+        }
+      `,
+      fragmentShader: `
+        varying vec3 markerColor;
+        void main() {
+          float radius = length(gl_PointCoord - vec2(0.5));
+          if (radius > 0.5 || radius < 0.27) discard;
+          gl_FragColor = vec4(markerColor, 0.95);
+        }
+      `,
+    });
+    const markers = new THREE.Points(geometry, material);
+    markers.renderOrder = 20;
+    runtime.junctionGroup.add(markers);
+    runtime.renderRequested = true;
+  }, [activeTool, meshReady, state.junctions, selectedJunctionId, hoveredJunctionId]);
 
   const meshUrl = apiUrl(apiBase, state.mesh.url);
   const labelUrl = state.mesh.labels_url;
@@ -196,7 +255,8 @@ export function RootViewport({
     );
     strokePreview.visible = false;
     strokePreview.renderOrder = 6;
-    content.add(lineGroup, relationGroup, strokePreview);
+    const junctionGroup = new THREE.Group();
+    content.add(lineGroup, relationGroup, junctionGroup, strokePreview);
     scene.add(content);
 
     const hemisphere = new THREE.HemisphereLight(0xd7fff2, 0x14231d, 1.35);
@@ -227,6 +287,7 @@ export function RootViewport({
       surfaceColors: null,
       lineGroup,
       relationGroup,
+      junctionGroup,
       lineMaterials: [],
       grid,
       renderOrigin: new THREE.Vector3().fromArray(
@@ -307,6 +368,30 @@ export function RootViewport({
     let strokeLastScreen: { x: number; y: number } | null = null;
     let strokeHits: MeshHit[] = [];
     const maximumStrokeSamples = 20_000;
+
+    // Junctions are an explicitly visible x-ray overlay. Pick in screen pixels
+    // so tiny internal graph connections remain selectable at any zoom level.
+    const findJunction = (event: PointerEvent): string | null => {
+      if (latestRef.current.activeTool !== "select") return null;
+      const rect = renderer.domElement.getBoundingClientRect();
+      let nearest: string | null = null;
+      let bestDistance = 10;
+      let bestDepth = Infinity;
+      const projected = new THREE.Vector3();
+      for (const junction of latestRef.current.state.junctions ?? []) {
+        projected.fromArray(junction.position).sub(runtime.renderOrigin).project(camera);
+        if (projected.z < -1 || projected.z > 1) continue;
+        const x = rect.left + (projected.x + 1) * rect.width / 2;
+        const y = rect.top + (1 - projected.y) * rect.height / 2;
+        const distance = Math.hypot(event.clientX - x, event.clientY - y);
+        if (distance < bestDistance || (distance === bestDistance && projected.z < bestDepth)) {
+          nearest = junction.junction_id;
+          bestDistance = distance;
+          bestDepth = projected.z;
+        }
+      }
+      return nearest;
+    };
 
     const findHitAt = (clientX: number, clientY: number): MeshHit | null => {
       if (!runtime.mesh || !runtime.labels || !runtime.geometry) return null;
@@ -414,6 +499,9 @@ export function RootViewport({
     };
 
     const pointerMove = (event: PointerEvent) => {
+      if (event.buttons || latestRef.current.interactionLocked) {
+        setHoveredJunction(null);
+      }
       if (event.pointerId === strokePointerId) {
         event.preventDefault();
         event.stopPropagation();
@@ -428,7 +516,18 @@ export function RootViewport({
       if (hoverFrame) return;
       hoverFrame = requestAnimationFrame(() => {
         hoverFrame = 0;
-        if (!latestPointerEvent || latestRef.current.interactionLocked) {
+        if (!latestPointerEvent || latestPointerEvent.buttons || latestRef.current.interactionLocked) {
+          setHovered(null);
+          setHoveredJunction(null);
+          return;
+        }
+        const junctionId = findJunction(latestPointerEvent);
+        setHoveredJunction(junctionId ? {
+          junctionId,
+          clientX: latestPointerEvent.clientX,
+          clientY: latestPointerEvent.clientY,
+        } : null);
+        if (junctionId) {
           setHovered(null);
           return;
         }
@@ -490,6 +589,11 @@ export function RootViewport({
       );
       pointerStart = null;
       if (suppressHit || distance > 5 || event.button !== 0) return;
+      const junctionId = findJunction(event);
+      if (junctionId) {
+        latestRef.current.onJunction(junctionId);
+        return;
+      }
       const hit = findHit(event);
       if (hit) latestRef.current.onHit(hit);
     };
@@ -503,6 +607,8 @@ export function RootViewport({
     };
     const pointerLeave = () => {
       if (strokePointerId === null) setHovered(null);
+      setHoveredJunction(null);
+      latestPointerEvent = null;
     };
     const contextMenu = (event: MouseEvent) => event.preventDefault();
 
@@ -542,6 +648,7 @@ export function RootViewport({
       renderer.domElement.removeEventListener("contextmenu", contextMenu);
       disposeGroup(lineGroup);
       disposeGroup(relationGroup);
+      disposeGroup(junctionGroup);
       runtime.strokePreview.geometry.dispose();
       (runtime.strokePreview.material as THREE.Material).dispose();
       runtime.geometry?.dispose();
@@ -552,9 +659,10 @@ export function RootViewport({
       renderer.domElement.remove();
       runtimeRef.current = null;
       setHovered(null);
+      setHoveredJunction(null);
       setMeshReady(false);
     };
-  }, [setClientGpu, setHovered, setMeshReady]);
+  }, [setClientGpu, setHovered, setHoveredJunction, setMeshReady]);
 
   useEffect(() => {
     const runtime = runtimeRef.current;

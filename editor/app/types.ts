@@ -58,6 +58,22 @@ export interface PointPatchRecord {
   indices_url: string;
 }
 
+export interface JunctionRecord {
+  junction_id: string;
+  parent_id: string;
+  insertion_index: number;
+  position: Vec3;
+  child_ids: string[];
+  can_swap: boolean;
+  disabled_reason: string | null;
+}
+
+export interface JunctionHover {
+  junctionId: string;
+  clientX: number;
+  clientY: number;
+}
+
 export interface EditorState {
   schema: string;
   viewer_id: string;
@@ -75,6 +91,7 @@ export interface EditorState {
     labels_url: string;
   };
   roots: RootRecord[];
+  junctions: JunctionRecord[];
   root_count: number;
   point_patches: PointPatchRecord[];
   point_patch_count: number;

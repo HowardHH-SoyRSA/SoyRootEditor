@@ -1,12 +1,14 @@
 "use client";
 
 import { create } from "zustand";
-import type { EditorState, HoverInfo, LoadProgress, ToolMode, Vec3 } from "./types";
+import type { EditorState, HoverInfo, JunctionHover, LoadProgress, ToolMode, Vec3 } from "./types";
 
 interface EditorUiState {
   serverState: EditorState | null;
   selectedRootId: string | null;
   selectedPatchId: string | null;
+  selectedJunctionId: string | null;
+  hoveredJunction: JunctionHover | null;
   hovered: HoverInfo | null;
   tool: ToolMode;
   draftPoints: Vec3[];
@@ -21,6 +23,8 @@ interface EditorUiState {
   setSelectedRootId: (rootId: string | null) => void;
   setSelectedPatchId: (patchId: string | null) => void;
   setHovered: (hovered: HoverInfo | null) => void;
+  setSelectedJunctionId: (junctionId: string | null) => void;
+  setHoveredJunction: (hovered: JunctionHover | null) => void;
   setTool: (tool: ToolMode) => void;
   addDraftPoint: (point: Vec3) => void;
   removeDraftPoint: () => void;
@@ -37,6 +41,8 @@ export const useEditorStore = create<EditorUiState>((set) => ({
   serverState: null,
   selectedRootId: null,
   selectedPatchId: null,
+  selectedJunctionId: null,
+  hoveredJunction: null,
   hovered: null,
   tool: "select",
   draftPoints: [],
@@ -64,6 +70,10 @@ export const useEditorStore = create<EditorUiState>((set) => ({
         serverState,
         selectedRootId: stillExists ? current.selectedRootId : null,
         selectedPatchId: patchStillExists ? current.selectedPatchId : null,
+        selectedJunctionId: serverState.junctions?.some(
+          (junction) => junction.junction_id === current.selectedJunctionId,
+        ) ? current.selectedJunctionId : null,
+        hoveredJunction: null,
       };
     }),
   replaceDataset: (serverState) =>
@@ -71,6 +81,8 @@ export const useEditorStore = create<EditorUiState>((set) => ({
       serverState,
       selectedRootId: null,
       selectedPatchId: null,
+      selectedJunctionId: null,
+      hoveredJunction: null,
       hovered: null,
       tool: "select",
       draftPoints: [],
@@ -86,12 +98,22 @@ export const useEditorStore = create<EditorUiState>((set) => ({
       meshReady: false,
     }),
   setSelectedRootId: (selectedRootId) =>
-    set({ selectedRootId, selectedPatchId: null }),
-  setSelectedPatchId: (selectedPatchId) => set({ selectedPatchId }),
+    set({ selectedRootId, selectedPatchId: null, selectedJunctionId: null }),
+  setSelectedPatchId: (selectedPatchId) => set({ selectedPatchId, selectedJunctionId: null }),
   setHovered: (hovered) => set({ hovered }),
+  setSelectedJunctionId: (selectedJunctionId) => set((current) => ({
+    selectedJunctionId,
+    selectedPatchId: null,
+    selectedRootId: current.serverState?.junctions?.find(
+      (junction) => junction.junction_id === selectedJunctionId,
+    )?.parent_id ?? current.selectedRootId,
+  })),
+  setHoveredJunction: (hoveredJunction) => set({ hoveredJunction }),
   setTool: (tool) =>
     set((current) => ({
       tool,
+      selectedJunctionId: null,
+      hoveredJunction: null,
       draftPoints:
         tool === current.tool && (tool === "redraw" || tool === "create")
           ? current.draftPoints

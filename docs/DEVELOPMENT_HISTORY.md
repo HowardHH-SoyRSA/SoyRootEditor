@@ -16,6 +16,7 @@ source snapshot. Dates are repository commit dates in China Standard Time.
 | 2026-09-05 | `4caf010` | Added reusable guidance snapshots and runtime reporting. |
 | 2026-09-08 | `f1ec9aa` | Preserved adjacent-root surface tracking and its regression tests. |
 | 2026-09-09 | Working tree | Added desktop viewer launch, transactional dataset switching, recent datasets, and independent multi-window sessions. |
+| 2026-09-11 | Working tree | Added junction hover/click inspection and an atomic, undoable outgoing parent/child-arm switch with corrected topology, point labels, root orders and measurements. |
 
 ## Current feature status
 
@@ -29,6 +30,8 @@ The viewer/editor line is implemented and covered by automated tests:
   rotation target, and camera preservation after edits.
 - Create-from-unassigned-path, split, merge, assign, reconnect, reparent,
   delete, redraw, and root-order correction.
+- Junction rings, multi-child junction inspection, and continuation-arm
+  correction with downstream attachment remapping and preserved camera view.
 - Durable undo/redo, immutable automatic results, append-only operation logs,
   hashed point-selection blobs, and materialised PLY/JSON/CSV/RSML exports.
 - Loopback-only Python API with a same-site session token and protected export
@@ -38,10 +41,17 @@ The viewer/editor line is implemented and covered by automated tests:
 
 ## Verification at this snapshot
 
-- Python test suite: 224 tests passed.
+- Python test suite: 238 tests passed, including junction splicing, primary-root
+  identity, shared attachment sites and self-contacts, downstream orders, point labels, atomic
+  rejection, read-only protection, durable-log failure, undo/redo, replay and
+  edited PLY/RSML hierarchy checks.
 - Editor TypeScript typecheck: passed.
 - Static Vite build: passed.
 - Rendered editor checks: 11 tests passed.
+- ESLint: passed. Live isolated fixture: visible junction rings, hover tooltip,
+  canvas click, child selection, switch, undo/redo and unchanged camera view
+  verified; no browser console warnings/errors. Real-dataset contact-region
+  assignment review and very-large-mesh junction performance remain untested.
 
 ## Pending work
 

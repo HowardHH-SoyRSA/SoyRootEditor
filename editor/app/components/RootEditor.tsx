@@ -40,6 +40,7 @@ import { RootColorLegend } from "./RootColorLegend";
 import { RootDetails } from "./RootDetails";
 import { RootTree } from "./RootTree";
 import { RootViewport } from "./RootViewport";
+import { JunctionDetails, JunctionTooltip } from "./JunctionDetails";
 
 type Toast = {
   id: number;
@@ -52,6 +53,9 @@ export function RootEditor() {
   const selectedRootId = useEditorStore((store) => store.selectedRootId);
   const selectedPatchId = useEditorStore((store) => store.selectedPatchId);
   const hovered = useEditorStore((store) => store.hovered);
+  const selectedJunctionId = useEditorStore((store) => store.selectedJunctionId);
+  const hoveredJunction = useEditorStore((store) => store.hoveredJunction);
+  const setSelectedJunctionId = useEditorStore((store) => store.setSelectedJunctionId);
   const tool = useEditorStore((store) => store.tool);
   const draftPoints = useEditorStore((store) => store.draftPoints);
   const brushRadius = useEditorStore((store) => store.brushRadius);
@@ -119,6 +123,13 @@ export function RootEditor() {
   );
   const toolDefinition =
     TOOLS.find((candidate) => candidate.id === tool) ?? TOOLS[0];
+  const selectedJunction = serverState?.junctions?.find((junction) => junction.junction_id === selectedJunctionId);
+  const hoverJunctionRecord = serverState?.junctions?.find((junction) => junction.junction_id === hoveredJunction?.junctionId);
+  const selectJunction = (junctionId: string) => {
+    if (busy || tool !== "select") return;
+    setSelectedJunctionId(junctionId);
+    setRightCollapsed(false);
+  };
 
   const notify = useCallback(
     (tone: Toast["tone"], message: string) => {
@@ -792,6 +803,7 @@ export function RootEditor() {
             state={serverState}
             interactionLocked={busy || !meshReady}
             onHit={handleHit}
+            onJunction={selectJunction}
             onStroke={handleBrushStroke}
             onError={handleViewportError}
             onScaleChange={handleScale}
@@ -814,8 +826,20 @@ export function RootEditor() {
         </section>
 
         <aside className="panel details-panel" aria-label="Root information">
-          <PanelHeader eyebrow="INSPECTOR" title={selectedPatch ? selectedPatch.patch_id : selectedRoot ? selectedRoot.root_id : "No selection"} side="right" collapsed={rightCollapsed} onCollapse={() => setRightCollapsed((value) => !value)} />
-          {!rightCollapsed ? (
+          <PanelHeader eyebrow="INSPECTOR" title={selectedJunction ? "Junction" : selectedPatch ? selectedPatch.patch_id : selectedRoot ? selectedRoot.root_id : "No selection"} side="right" collapsed={rightCollapsed} onCollapse={() => setRightCollapsed((value) => !value)} />
+          {!rightCollapsed && selectedJunction ? (
+            <JunctionDetails
+              key={selectedJunction.junction_id}
+              junction={selectedJunction}
+              disabled={busy || serverState.read_only}
+              onClose={() => setSelectedJunctionId(null)}
+              onSwap={(childId) => void runOperation("swap_junction_branches", {
+                parent_id: selectedJunction.parent_id,
+                child_id: childId,
+                insertion_index: selectedJunction.insertion_index,
+              }, "Junction arms switched; topology and measurements updated.")}
+            />
+          ) : !rightCollapsed ? (
             <RootDetails
               root={selectedRoot}
               patch={selectedPatch}
@@ -826,6 +850,8 @@ export function RootEditor() {
               onBrushRadius={setBrushRadius}
               onApplyOrder={(order) => void applyOrder(order)}
               onSelect={selectAndFocus}
+              junctions={serverState.junctions ?? []}
+              onSelectJunction={selectJunction}
             />
           ) : null}
         </aside>
@@ -851,6 +877,9 @@ export function RootEditor() {
 
       {deleteCandidate ? (
         <ConfirmDialog root={deleteCandidate} onCancel={() => setDeleteCandidate(null)} onConfirm={() => void confirmDelete()} />
+      ) : null}
+      {hoveredJunction && hoverJunctionRecord ? (
+        <JunctionTooltip junction={hoverJunctionRecord} hovered={hoveredJunction} />
       ) : null}
 
       {pendingDataset ? (

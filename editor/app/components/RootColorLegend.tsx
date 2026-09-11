@@ -33,6 +33,7 @@ export function RootColorLegend({ collapsed }: { collapsed: boolean }) {
           );
         })}
       </ul>
+      {!collapsed ? <p className="junction-legend">◉ Cyan rings: junctions (Inspect mode). Visible through surfaces; hover or click.</p> : null}
     </aside>
   );
 }
