@@ -20,6 +20,9 @@ from .session import (
 )
 
 
+VIEWER_COMPATIBILITY = "final-support-v1"
+
+
 def create_editor_app(
     output_dir: str | Path | None = None,
     *,
@@ -76,7 +79,13 @@ def create_editor_app(
     @app.get("/api/health")
     def health():
         payload = manager.viewer_payload(_viewer_id(manager))
-        return jsonify({"ok": True, **payload})
+        return jsonify(
+            {
+                "ok": True,
+                "viewer_compatibility": VIEWER_COMPATIBILITY,
+                **payload,
+            }
+        )
 
     @app.post("/api/viewers")
     def viewers():

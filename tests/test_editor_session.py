@@ -25,6 +25,100 @@ SOURCE_FILES = (
 )
 
 
+def test_supported_final_fit_gap_survives_load_edit_and_export(
+    editor_bundle: Path,
+    tmp_path: Path,
+) -> None:
+    hierarchy_path = editor_bundle / "root_hierarchy.json"
+    hierarchy = json.loads(hierarchy_path.read_text(encoding="utf-8"))
+    for row in hierarchy["roots"]:
+        if row["root_id"] == "root-b":
+            row["polyline"] = row["polyline"][1:]
+            row["centerline_assessment"] = {
+                "status": "partial_support",
+                "parent_connector_supported": False,
+            }
+        elif row["root_id"] == "root-c":
+            row["polyline"] = [row["polyline"][-1]]
+            row["centerline_assessment"] = {
+                "status": "insufficient_support",
+                "parent_connector_supported": False,
+            }
+    hierarchy_path.write_text(json.dumps(hierarchy), encoding="utf-8")
+
+    session_dir = tmp_path / "fit-session"
+    session = EditorSession(editor_bundle, session_dir=session_dir)
+    before = {
+        root_id: session.roots[root_id].points.copy()
+        for root_id in ("root-b", "root-c")
+    }
+    session.apply_operation(
+        "assign_points",
+        {"root_id": "root-b", "indices": [17]},
+    )
+
+    for root_id, line in before.items():
+        np.testing.assert_array_equal(session.roots[root_id].points, line)
+    assert session.roots["root-b"].centerline_assessment[
+        "assignment_changed_since_fit"
+    ]
+    assert session.roots["root-c"].traits["length"] is None
+
+    export_dir = session.export_materialised(tmp_path / "fit-export")
+    exported = json.loads(
+        (export_dir / "edited_root_hierarchy.json").read_text(encoding="utf-8")
+    )
+    exported_roots = {row["root_id"]: row for row in exported["roots"]}
+    assert exported_roots["root-b"]["centerline_assessment"][
+        "parent_connector_supported"
+    ] is False
+    assert exported_roots["root-b"]["body_start_index"] == 0
+
+    reloaded = EditorSession(editor_bundle, session_dir=session_dir)
+    for root_id, line in before.items():
+        np.testing.assert_array_equal(reloaded.roots[root_id].points, line)
+
+
+def test_unexplained_parent_gap_remains_invalid(
+    editor_bundle: Path,
+    tmp_path: Path,
+) -> None:
+    hierarchy_path = editor_bundle / "root_hierarchy.json"
+    hierarchy = json.loads(hierarchy_path.read_text(encoding="utf-8"))
+    row = next(row for row in hierarchy["roots"] if row["root_id"] == "root-b")
+    row["polyline"] = row["polyline"][1:]
+    hierarchy_path.write_text(json.dumps(hierarchy), encoding="utf-8")
+
+    with pytest.raises(
+        EditorValidationError,
+        match="root-b is geometrically detached from its parent",
+    ):
+        EditorSession(editor_bundle, session_dir=tmp_path / "invalid-gap-session")
+
+
+def test_exposed_body_metadata_controls_trait_window(
+    editor_bundle: Path,
+    tmp_path: Path,
+) -> None:
+    hierarchy_path = editor_bundle / "root_hierarchy.json"
+    hierarchy = json.loads(hierarchy_path.read_text(encoding="utf-8"))
+    row = next(row for row in hierarchy["roots"] if row["root_id"] == "root-b")
+    row["body_start_index"] = 1
+    row["centerline_assessment"] = {
+        "status": "fitted",
+        "parent_connector_supported": True,
+    }
+    hierarchy_path.write_text(json.dumps(hierarchy), encoding="utf-8")
+
+    session = EditorSession(editor_bundle, session_dir=tmp_path / "body-session")
+    session._recompute_traits()
+    root = session.roots["root-b"]
+
+    assert root.traits["base_vector_start_x"] == pytest.approx(root.points[1, 0])
+    assert root.traits["parent_connector_length"] == pytest.approx(0.5)
+    assert root.clone().body_start_index == 1
+
+
 @pytest.fixture(autouse=True)
 def fixed_hardware(monkeypatch: pytest.MonkeyPatch) -> None:
     """Keep editor tests deterministic and independent of workstation hardware."""

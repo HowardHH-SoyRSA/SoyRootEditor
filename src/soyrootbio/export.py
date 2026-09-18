@@ -181,6 +181,9 @@ def write_rsml(
         ("length", "real", "mesh_unit"),
         ("mean_diameter", "real", "mesh_unit"),
         ("tortuosity", "real", "none"),
+        ("body_start_index", "integer", "none"),
+        ("exposed_body_length", "real", "mesh_unit"),
+        ("parent_connector_length", "real", "mesh_unit"),
     ):
         definition = ET.SubElement(property_definitions, "property-definition")
         ET.SubElement(definition, "label").text = name
@@ -213,6 +216,7 @@ def write_rsml(
                 points=np.asarray(child.points, dtype=float),
                 confidence=float(child.confidence),
                 trait=trait_lookup.get(child.root_id),
+                body_start_index=child.body_start_index,
             )
             append_children(child_element, child.root_id)
 
@@ -232,6 +236,7 @@ def _rsml_root_element(
     points: np.ndarray,
     confidence: float,
     trait,
+    body_start_index: int = 0,
 ) -> ET.Element:
     root = ET.SubElement(parent, "root", {"id": root_id, "label": label})
     properties = ET.SubElement(root, "properties")
@@ -241,6 +246,13 @@ def _rsml_root_element(
         "length": np.nan if trait is None else trait.get("length", np.nan),
         "mean_diameter": np.nan if trait is None else trait.get("mean_diameter", np.nan),
         "tortuosity": np.nan if trait is None else trait.get("tortuosity", np.nan),
+        "body_start_index": body_start_index,
+        "exposed_body_length": (
+            np.nan if trait is None else trait.get("exposed_body_length", np.nan)
+        ),
+        "parent_connector_length": (
+            np.nan if trait is None else trait.get("parent_connector_length", np.nan)
+        ),
     }
     for name, value in values.items():
         ET.SubElement(properties, name, {"value": str(value)})
