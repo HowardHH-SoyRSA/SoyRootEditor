@@ -12,6 +12,18 @@ export type ToolMode =
   | "redraw"
   | "order";
 
+export type DisplayCategory =
+  | "primary"
+  | "order1"
+  | "order2"
+  | "order3"
+  | "higherOrder"
+  | "uncertain"
+  | "unassigned"
+  | "junctions";
+
+export type DisplayVisibility = Record<DisplayCategory, boolean>;
+
 export interface RootRecord {
   root_id: string;
   numeric_label: number;
@@ -144,6 +156,20 @@ export interface MeshHit {
   numericLabel: number;
   position: Vec3;
   vertexIndex: number;
+}
+
+export interface MeshHitContext {
+  clientX: number;
+  clientY: number;
+  ctrlKey: boolean;
+}
+
+export interface VertexInfo {
+  vertex_index: number;
+  numeric_label: number;
+  label: string;
+  root_id: string | null;
+  position: Vec3;
 }
 
 export interface HoverInfo extends MeshHit {

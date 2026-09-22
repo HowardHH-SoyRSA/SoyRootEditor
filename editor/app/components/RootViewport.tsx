@@ -17,8 +17,11 @@ import {
 } from "../lib/rootColors";
 import { useEditorStore } from "../store";
 import type {
+  DisplayCategory,
+  DisplayVisibility,
   EditorState,
   MeshHit,
+  MeshHitContext,
   ParsedMesh,
   PointPatchRecord,
   RootRecord,
@@ -30,7 +33,7 @@ interface RootViewportProps {
   apiBase: string;
   state: EditorState;
   interactionLocked: boolean;
-  onHit: (hit: MeshHit) => void;
+  onHit: (hit: MeshHit, context: MeshHitContext) => void;
   onJunction: (junctionId: string) => void;
   onStroke: (hits: MeshHit[]) => void;
   onError: (message: string) => void;
@@ -52,6 +55,8 @@ interface ViewRuntime {
   geometry: THREE.BufferGeometry | null;
   labels: Int32Array | null;
   surfaceColors: Uint8Array | null;
+  surfaceVisibility: Uint8Array | null;
+  allSurfaceCategoriesVisible: boolean;
   lineGroup: THREE.Group;
   relationGroup: THREE.Group;
   junctionGroup: THREE.Group;
@@ -91,6 +96,7 @@ export function RootViewport({
   const selectedPatchId = useEditorStore((store) => store.selectedPatchId);
   const selectedJunctionId = useEditorStore((store) => store.selectedJunctionId);
   const hoveredJunctionId = useEditorStore((store) => store.hoveredJunction?.junctionId);
+  const displayVisibility = useEditorStore((store) => store.displayVisibility);
   const setHoveredJunction = useEditorStore((store) => store.setHoveredJunction);
   const activeTool = useEditorStore((store) => store.tool);
   const draftPoints = useEditorStore((store) => store.draftPoints);
@@ -106,6 +112,7 @@ export function RootViewport({
     onStroke,
     onError,
     activeTool,
+    displayVisibility,
   });
   useLayoutEffect(() => {
     latestRef.current = {
@@ -116,8 +123,18 @@ export function RootViewport({
       onStroke,
       onError,
       activeTool,
+      displayVisibility,
     };
-  }, [activeTool, interactionLocked, onError, onHit, onJunction, onStroke, state]);
+  }, [
+    activeTool,
+    displayVisibility,
+    interactionLocked,
+    onError,
+    onHit,
+    onJunction,
+    onStroke,
+    state,
+  ]);
 
   const setHovered = useEditorStore((store) => store.setHovered);
   const setLoadProgress = useEditorStore((store) => store.setLoadProgress);
@@ -130,7 +147,11 @@ export function RootViewport({
     if (!runtime) return;
     disposeGroup(runtime.junctionGroup);
     runtime.renderRequested = true;
-    if (activeTool !== "select" || !meshReady) return;
+    if (
+      activeTool !== "select" ||
+      !meshReady ||
+      !displayVisibility.junctions
+    ) return;
     const junctions = state.junctions ?? [];
     const positions: number[] = [];
     const sizes: number[] = [];
@@ -174,7 +195,14 @@ export function RootViewport({
     markers.renderOrder = 20;
     runtime.junctionGroup.add(markers);
     runtime.renderRequested = true;
-  }, [activeTool, meshReady, state.junctions, selectedJunctionId, hoveredJunctionId]);
+  }, [
+    activeTool,
+    displayVisibility.junctions,
+    meshReady,
+    state.junctions,
+    selectedJunctionId,
+    hoveredJunctionId,
+  ]);
 
   const meshUrl = apiUrl(apiBase, state.mesh.url);
   const labelUrl = state.mesh.labels_url;
@@ -285,6 +313,8 @@ export function RootViewport({
       geometry: null,
       labels: null,
       surfaceColors: null,
+      surfaceVisibility: null,
+      allSurfaceCategoriesVisible: true,
       lineGroup,
       relationGroup,
       junctionGroup,
@@ -372,7 +402,10 @@ export function RootViewport({
     // Junctions are an explicitly visible x-ray overlay. Pick in screen pixels
     // so tiny internal graph connections remain selectable at any zoom level.
     const findJunction = (event: PointerEvent): string | null => {
-      if (latestRef.current.activeTool !== "select") return null;
+      if (
+        latestRef.current.activeTool !== "select" ||
+        !latestRef.current.displayVisibility.junctions
+      ) return null;
       const rect = renderer.domElement.getBoundingClientRect();
       let nearest: string | null = null;
       let bestDistance = 10;
@@ -399,7 +432,17 @@ export function RootViewport({
       runtime.pointer.x = ((clientX - rect.left) / rect.width) * 2 - 1;
       runtime.pointer.y = -((clientY - rect.top) / rect.height) * 2 + 1;
       raycaster.setFromCamera(runtime.pointer, camera);
-      const intersection = raycaster.intersectObject(runtime.mesh, false)[0];
+      const intersections = raycaster.intersectObject(runtime.mesh, false);
+      const intersection = runtime.allSurfaceCategoriesVisible
+        ? intersections[0]
+        : intersections.find((candidate) => {
+            if (!candidate.face || !runtime.surfaceVisibility) return false;
+            return (
+              runtime.surfaceVisibility[candidate.face.a] === 1 &&
+              runtime.surfaceVisibility[candidate.face.b] === 1 &&
+              runtime.surfaceVisibility[candidate.face.c] === 1
+            );
+          });
       if (!intersection?.face) return null;
       const localPoint = runtime.mesh.worldToLocal(intersection.point.clone());
       const position = runtime.geometry.getAttribute("position");
@@ -565,7 +608,7 @@ export function RootViewport({
       pointerStart = {
         x: event.clientX,
         y: event.clientY,
-        suppressHit: assigning,
+        suppressHit: assigning && !event.ctrlKey,
       };
     };
     const pointerUp = (event: PointerEvent) => {
@@ -589,13 +632,30 @@ export function RootViewport({
       );
       pointerStart = null;
       if (suppressHit || distance > 5 || event.button !== 0) return;
+      if (event.ctrlKey) {
+        const hit = findHit(event);
+        if (hit) {
+          latestRef.current.onHit(hit, {
+            clientX: event.clientX,
+            clientY: event.clientY,
+            ctrlKey: true,
+          });
+        }
+        return;
+      }
       const junctionId = findJunction(event);
       if (junctionId) {
         latestRef.current.onJunction(junctionId);
         return;
       }
       const hit = findHit(event);
-      if (hit) latestRef.current.onHit(hit);
+      if (hit) {
+        latestRef.current.onHit(hit, {
+          clientX: event.clientX,
+          clientY: event.clientY,
+          ctrlKey: false,
+        });
+      }
     };
     const pointerCancel = (event: PointerEvent) => {
       if (event.pointerId !== strokePointerId) return;
@@ -723,9 +783,18 @@ export function RootViewport({
         parsed.labels,
         latestRef.current.state.roots,
       );
+      const surfaceVisibility = makeSurfaceVisibility(
+        parsed.labels,
+        latestRef.current.state.roots,
+        latestRef.current.displayVisibility,
+      );
       geometry.setAttribute(
         "color",
         new THREE.Uint8BufferAttribute(surfaceColors, 3, true),
+      );
+      geometry.setAttribute(
+        "categoryVisible",
+        new THREE.Uint8BufferAttribute(surfaceVisibility, 1, false),
       );
       geometry.computeBoundingBox();
       geometry.computeBoundingSphere();
@@ -733,6 +802,13 @@ export function RootViewport({
       runtime.geometry = geometry;
       runtime.labels = parsed.labels;
       runtime.surfaceColors = surfaceColors;
+      runtime.surfaceVisibility = surfaceVisibility;
+      runtime.allSurfaceCategoriesVisible = allPointCategoriesVisible(
+        latestRef.current.displayVisibility,
+      );
+      (
+        runtime.raycaster as THREE.Raycaster & { firstHitOnly?: boolean }
+      ).firstHitOnly = runtime.allSurfaceCategoriesVisible;
       runtime.renderOrigin.fromArray(
         latestRef.current.state.mesh.render_origin ?? [0, 0, 0],
       );
@@ -758,12 +834,7 @@ export function RootViewport({
 
       const mesh = new THREE.Mesh(
         geometry,
-        new THREE.MeshStandardMaterial({
-          vertexColors: true,
-          roughness: 0.72,
-          metalness: 0.02,
-          side: THREE.FrontSide,
-        }),
+        makeCategoryVisibilityMaterial(),
       );
       mesh.name = "full-resolution-root-surface";
       (mesh as THREE.Mesh).raycast = acceleratedRaycast;
@@ -836,6 +907,8 @@ export function RootViewport({
       runtime.geometry = null;
       runtime.labels = null;
       runtime.surfaceColors = null;
+      runtime.surfaceVisibility = null;
+      runtime.allSurfaceCategoriesVisible = true;
     };
     // The immutable geometry URL/count identify the loaded source. Label revisions
     // are fetched by the independent effect below.
@@ -868,6 +941,11 @@ export function RootViewport({
           runtime,
           latestRef.current.state.roots,
         );
+        updateSurfaceVisibility(
+          runtime,
+          latestRef.current.state.roots,
+          latestRef.current.displayVisibility,
+        );
       })
       .catch((error) => {
         if (error instanceof DOMException && error.name === "AbortError") return;
@@ -882,6 +960,12 @@ export function RootViewport({
     state.mesh.root_label_revision,
     state.mesh.vertex_count,
   ]);
+
+  useEffect(() => {
+    const runtime = runtimeRef.current;
+    if (!runtime?.mesh || !runtime.labels) return;
+    updateSurfaceVisibility(runtime, state.roots, displayVisibility);
+  }, [displayVisibility, meshReady, state.roots]);
 
   useEffect(() => {
     const runtime = runtimeRef.current;
@@ -925,10 +1009,12 @@ export function RootViewport({
       selectedPatchId ? null : selectedRootId,
       draftPoints,
       activeTool,
+      displayVisibility,
     );
     runtime.renderRequested = true;
   }, [
     activeTool,
+    displayVisibility,
     draftPoints,
     selectedPatchId,
     selectedRootId,
@@ -976,8 +1062,8 @@ export function RootViewport({
         <span><i className="axis-dot axis-z" /> Z</span>
         <em>
           {activeTool === "assign"
-            ? "Shift + left-drag paint · left-drag rotate · wheel zoom"
-            : "drag rotate · right-drag pan · wheel zoom"}
+            ? "Shift + left-drag paint · Ctrl + click exact XYZ · wheel zoom"
+            : "click inspect · Ctrl + click exact XYZ · drag rotate · wheel zoom"}
         </em>
       </div>
       <div className="resolution-badge">
@@ -1031,6 +1117,102 @@ function makeSurfaceColors(
   return colors;
 }
 
+function rootDisplayCategory(root: RootRecord): DisplayCategory {
+  if (root.root_order <= 0) return "primary";
+  if (root.root_order === 1) return "order1";
+  if (root.root_order === 2) return "order2";
+  if (root.root_order === 3) return "order3";
+  return "higherOrder";
+}
+
+function pointDisplayCategory(
+  numericLabel: number,
+  rootByLabel: Map<number, RootRecord>,
+): DisplayCategory {
+  if (numericLabel === -2) return "uncertain";
+  if (numericLabel === -1) return "unassigned";
+  const root = rootByLabel.get(numericLabel);
+  return root ? rootDisplayCategory(root) : "unassigned";
+}
+
+function allPointCategoriesVisible(visibility: DisplayVisibility): boolean {
+  return (
+    visibility.primary &&
+    visibility.order1 &&
+    visibility.order2 &&
+    visibility.order3 &&
+    visibility.higherOrder &&
+    visibility.uncertain &&
+    visibility.unassigned
+  );
+}
+
+function makeSurfaceVisibility(
+  labels: Int32Array,
+  roots: RootRecord[],
+  visibility: DisplayVisibility,
+): Uint8Array {
+  const values = new Uint8Array(labels.length);
+  const rootByLabel = new Map(roots.map((root) => [root.numeric_label, root]));
+  for (let vertex = 0; vertex < labels.length; vertex += 1) {
+    values[vertex] = visibility[
+      pointDisplayCategory(labels[vertex], rootByLabel)
+    ] ? 1 : 0;
+  }
+  return values;
+}
+
+function updateSurfaceVisibility(
+  runtime: ViewRuntime,
+  roots: RootRecord[],
+  visibility: DisplayVisibility,
+) {
+  if (!runtime.geometry || !runtime.labels) return;
+  const values = makeSurfaceVisibility(runtime.labels, roots, visibility);
+  runtime.surfaceVisibility = values;
+  runtime.allSurfaceCategoriesVisible = allPointCategoriesVisible(visibility);
+  runtime.geometry.setAttribute(
+    "categoryVisible",
+    new THREE.Uint8BufferAttribute(values, 1, false),
+  );
+  runtime.geometry.getAttribute("categoryVisible").needsUpdate = true;
+  (
+    runtime.raycaster as THREE.Raycaster & { firstHitOnly?: boolean }
+  ).firstHitOnly = runtime.allSurfaceCategoriesVisible;
+  runtime.renderRequested = true;
+}
+
+function makeCategoryVisibilityMaterial(): THREE.MeshStandardMaterial {
+  const material = new THREE.MeshStandardMaterial({
+    vertexColors: true,
+    roughness: 0.72,
+    metalness: 0.02,
+    side: THREE.FrontSide,
+  });
+  material.onBeforeCompile = (shader) => {
+    shader.vertexShader = shader.vertexShader
+      .replace(
+        "#include <common>",
+        "#include <common>\nattribute float categoryVisible;\nvarying float vCategoryVisible;",
+      )
+      .replace(
+        "#include <begin_vertex>",
+        "vCategoryVisible = categoryVisible;\n#include <begin_vertex>",
+      );
+    shader.fragmentShader = shader.fragmentShader
+      .replace(
+        "#include <common>",
+        "#include <common>\nvarying float vCategoryVisible;",
+      )
+      .replace(
+        "#include <dithering_fragment>",
+        "if (vCategoryVisible < 0.999) discard;\n#include <dithering_fragment>",
+      );
+  };
+  material.customProgramCacheKey = () => "category-visibility-v1";
+  return material;
+}
+
 function updateSurfaceColors(
   runtime: ViewRuntime,
   roots: RootRecord[],
@@ -1056,17 +1238,23 @@ function rebuildCenterlines(
   selectedRootId: string | null,
   draftPoints: Vec3[],
   activeTool: ToolMode,
+  visibility: DisplayVisibility,
 ) {
   disposeGroup(runtime.lineGroup);
   disposeGroup(runtime.relationGroup);
   runtime.lineMaterials = [];
 
+  const visibleRoots = roots.filter(
+    (root) => visibility[rootDisplayCategory(root)],
+  );
   let segmentCount = 0;
-  for (const root of roots) segmentCount += Math.max(root.polyline.length - 1, 0);
+  for (const root of visibleRoots) {
+    segmentCount += Math.max(root.polyline.length - 1, 0);
+  }
   const positions = new Float32Array(segmentCount * 6);
   const colors = new Uint8Array(segmentCount * 6);
   let cursor = 0;
-  for (const root of roots) {
+  for (const root of visibleRoots) {
     const color = rootOrderRgb(root.root_order);
     for (let point = 1; point < root.polyline.length; point += 1) {
       const start = root.polyline[point - 1];
@@ -1111,7 +1299,9 @@ function rebuildCenterlines(
   baseLines.renderOrder = 3;
   runtime.lineGroup.add(baseLines);
 
-  const selected = roots.find((root) => root.root_id === selectedRootId);
+  const selected = visibleRoots.find(
+    (root) => root.root_id === selectedRootId,
+  );
   if (selected) {
     const relations: Array<{
       root: RootRecord;
@@ -1124,7 +1314,9 @@ function rebuildCenterlines(
       width: 4.6,
       opacity: 1,
     }];
-    const parent = roots.find((root) => root.root_id === selected.parent_id);
+    const parent = visibleRoots.find(
+      (root) => root.root_id === selected.parent_id,
+    );
     if (parent) {
       relations.push({
         root: parent,
@@ -1134,7 +1326,7 @@ function rebuildCenterlines(
       });
     }
     for (const childId of selected.children_ids) {
-      const child = roots.find((root) => root.root_id === childId);
+      const child = visibleRoots.find((root) => root.root_id === childId);
       if (child) {
         relations.push({
           root: child,

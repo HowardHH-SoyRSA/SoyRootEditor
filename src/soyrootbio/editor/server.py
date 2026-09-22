@@ -138,6 +138,10 @@ def create_editor_app(
             },
         )
 
+    @app.get("/api/vertices/<int:vertex_index>")
+    def vertex(vertex_index: int):
+        return jsonify(_session(manager).vertex_snapshot(vertex_index))
+
     @app.get("/api/point-patches/<patch_id>/indices")
     def point_patch_indices(patch_id: str):
         session = _session(manager)

@@ -1,16 +1,30 @@
 import { ROOT_EXPORT_COLORS, rgbToCss } from "../lib/rootColors";
+import { useEditorStore } from "../store";
+import type { DisplayCategory } from "../types";
+
+const JUNCTION_COLOR = [102, 217, 255] as const;
 
 const LEGEND_ITEMS = [
-  { label: "Primary", order: "O0", color: ROOT_EXPORT_COLORS.primary },
-  { label: "First order", order: "O1", color: ROOT_EXPORT_COLORS.order1 },
-  { label: "Second order", order: "O2", color: ROOT_EXPORT_COLORS.order2 },
-  { label: "Third order", order: "O3", color: ROOT_EXPORT_COLORS.order3 },
-  { label: "Higher order", order: "O4+", color: ROOT_EXPORT_COLORS.higherOrder },
-  { label: "Uncertain", order: "QC", color: ROOT_EXPORT_COLORS.uncertain },
-  { label: "Unassigned", order: "—", color: ROOT_EXPORT_COLORS.unassigned },
-] as const;
+  { category: "primary", label: "Primary", order: "O0", color: ROOT_EXPORT_COLORS.primary },
+  { category: "order1", label: "First order", order: "O1", color: ROOT_EXPORT_COLORS.order1 },
+  { category: "order2", label: "Second order", order: "O2", color: ROOT_EXPORT_COLORS.order2 },
+  { category: "order3", label: "Third order", order: "O3", color: ROOT_EXPORT_COLORS.order3 },
+  { category: "higherOrder", label: "Higher order", order: "O4+", color: ROOT_EXPORT_COLORS.higherOrder },
+  { category: "uncertain", label: "Uncertain", order: "QC", color: ROOT_EXPORT_COLORS.uncertain },
+  { category: "unassigned", label: "Unassigned", order: "—", color: ROOT_EXPORT_COLORS.unassigned },
+  { category: "junctions", label: "Junctions", order: "UI", color: JUNCTION_COLOR },
+] satisfies ReadonlyArray<{
+  category: DisplayCategory;
+  label: string;
+  order: string;
+  color: readonly [number, number, number];
+}>;
 
 export function RootColorLegend({ collapsed }: { collapsed: boolean }) {
+  const displayVisibility = useEditorStore((store) => store.displayVisibility);
+  const toggleDisplayCategory = useEditorStore(
+    (store) => store.toggleDisplayCategory,
+  );
   return (
     <aside
       className={`root-color-legend ${collapsed ? "is-collapsed" : ""}`}
@@ -18,22 +32,37 @@ export function RootColorLegend({ collapsed }: { collapsed: boolean }) {
     >
       <header>
         <span>EXPORT COLORS</span>
-        <small>PLY · CSV</small>
+        <small>PLY · CSV · UI</small>
       </header>
       <ul>
         {LEGEND_ITEMS.map((item) => {
           const color = rgbToCss(item.color);
-          const description = `${item.label} · ${item.order} · ${color.toUpperCase()}`;
+          const visible = displayVisibility[item.category];
+          const description = `${item.label} · ${item.order} · ${color.toUpperCase()} · ${visible ? "visible" : "hidden"}`;
           return (
-            <li key={item.label} aria-label={description} title={description}>
-              <i aria-hidden="true" style={{ background: color }} />
+            <li
+              key={item.category}
+              className={visible ? "is-visible" : "is-hidden"}
+              aria-label={description}
+            >
+              <button
+                type="button"
+                className="legend-visibility-switch"
+                role="switch"
+                aria-checked={visible}
+                aria-label={`${visible ? "Hide" : "Show"} ${item.label}`}
+                title={`${visible ? "Hide" : "Show"} ${item.label}`}
+                onClick={() => toggleDisplayCategory(item.category)}
+              >
+                <i aria-hidden="true" style={{ background: color }} />
+              </button>
               <span>{item.label}<b>{item.order}</b></span>
               <code>{color.toUpperCase()}</code>
             </li>
           );
         })}
       </ul>
-      {!collapsed ? <p className="junction-legend">◉ Cyan rings: junctions (Inspect mode). Visible through surfaces; hover or click.</p> : null}
+      {!collapsed ? <p className="junction-legend">Each switch controls viewport visibility only; exported labels and colors are unchanged.</p> : null}
     </aside>
   );
 }

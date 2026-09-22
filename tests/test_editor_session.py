@@ -500,6 +500,35 @@ def test_public_state_exposes_full_metrics_relationships_and_gpu_policy(
     assert roots["root-a"]["tip_point"] == [1.5, 0.0, 2.8]
 
 
+def test_vertex_snapshot_reports_exact_source_coordinate_and_label(
+    editor_bundle: Path,
+) -> None:
+    session = _new_session(editor_bundle)
+    precise = np.array(
+        [1_000_000_000.1234567, -2_000_000_000.7654321, 0.000000123],
+        dtype=np.float64,
+    )
+    session.mesh.positions[17] = precise
+
+    unassigned = session.vertex_snapshot(17)
+    assert unassigned == {
+        "vertex_index": 17,
+        "numeric_label": -1,
+        "label": "unassigned",
+        "root_id": None,
+        "position": precise.tolist(),
+    }
+    uncertain = session.vertex_snapshot(18)
+    assert uncertain["label"] == "uncertain"
+    assert uncertain["numeric_label"] == -2
+    assigned = session.vertex_snapshot(5)
+    assert assigned["label"] == "root-a"
+    assert assigned["root_id"] == "root-a"
+
+    with pytest.raises(EditorValidationError, match="outside the mesh vertex array"):
+        session.vertex_snapshot(19)
+
+
 def test_point_patches_follow_same_label_triangle_connectivity_and_history(
     editor_bundle: Path,
 ) -> None:
@@ -582,6 +611,19 @@ def test_local_editor_api_serves_full_mesh_labels_and_history(
         np.frombuffer(labels_response.data, dtype="<i4"),
         [0] * 5 + [1] * 4 + [2] * 4 + [3] * 4 + [-1, -2],
     )
+
+    vertex_response = client.get("/api/vertices/17")
+    assert vertex_response.status_code == 200
+    assert vertex_response.json == {
+        "vertex_index": 17,
+        "numeric_label": -1,
+        "label": "unassigned",
+        "root_id": None,
+        "position": [2.0, 2.0, 2.0],
+    }
+    invalid_vertex = client.get("/api/vertices/19")
+    assert invalid_vertex.status_code == 400
+    assert invalid_vertex.json["kind"] == "validation"
 
     unassigned_patch = next(
         patch

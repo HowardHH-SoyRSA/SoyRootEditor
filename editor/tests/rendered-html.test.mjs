@@ -143,6 +143,35 @@ test("lists and highlights connected uncertain and unassigned point patches", as
   assert.match(css, /\.patch-row\.selected/);
 });
 
+test("click-inspects point-state labels and Ctrl-click shows exact vertex coordinates", async () => {
+  const [editor, viewport, chrome, api, css] = await Promise.all([
+    readFile(new URL("app/components/RootEditor.tsx", root), "utf8"),
+    readFile(new URL("app/components/RootViewport.tsx", root), "utf8"),
+    readFile(new URL("app/components/EditorChrome.tsx", root), "utf8"),
+    readFile(new URL("app/lib/api.ts", root), "utf8"),
+    readFile(new URL("app/globals.css", root), "utf8"),
+  ]);
+  assert.match(viewport, /if \(event\.ctrlKey\)/);
+  assert.match(viewport, /ctrlKey: true/);
+  assert.match(viewport, /Ctrl \+ click exact XYZ/);
+  assert.match(editor, /const inspectExactPoint = useCallback/);
+  assert.match(editor, /fetchVertexInfo\([\s\S]*hit\.vertexIndex/);
+  assert.match(editor, /hit\.rootId[\s\S]*loadingExact: false/);
+  assert.match(chrome, /function pointStateLabel/);
+  assert.match(chrome, /return "uncertain"/);
+  assert.match(chrome, /return "unassigned"/);
+  assert.match(chrome, /Exact source coordinate/);
+  assert.match(chrome, /coordinateText = exact/);
+  assert.match(chrome, /`\(\$\{exact\.position\.map\(formatExactCoordinate\)\.join\(", "\)\}\)`/);
+  assert.match(chrome, /navigator\.clipboard\.writeText\(coordinateText\)/);
+  assert.match(chrome, /Copy XYZ/);
+  assert.match(chrome, /Copy failed/);
+  assert.match(api, /\/api\/vertices\/\$\{vertexIndex\}/);
+  assert.match(css, /\.point-inspection-card/);
+  assert.match(css, /\.point-coordinate-grid/);
+  assert.match(css, /\.point-coordinate-copy/);
+});
+
 test("paints a continuous drag as one undoable assignment operation", async () => {
   const [editor, viewport, chrome, details] = await Promise.all([
     readFile(new URL("app/components/RootEditor.tsx", root), "utf8"),
@@ -158,7 +187,7 @@ test("paints a continuous drag as one undoable assignment operation", async () =
   assert.match(viewport, /setPointerCapture\(event\.pointerId\)/);
   assert.match(viewport, /event\.stopImmediatePropagation\(\)/);
   assert.match(viewport, /event\.button === 0 &&\s*event\.shiftKey/);
-  assert.match(viewport, /suppressHit: assigning/);
+  assert.match(viewport, /suppressHit: assigning && !event\.ctrlKey/);
   assert.doesNotMatch(viewport, /!event\.altKey/);
   assert.match(
     viewport,
@@ -214,6 +243,42 @@ test("inherits the SoyRootBio exported root color contract", async () => {
   assert.match(legend, /className=\{`root-color-legend/);
   assert.match(legend, /color\.toUpperCase\(\)/);
   assert.doesNotMatch(viewport, /\[88,\s*188,\s*156\]/);
+});
+
+test("export-color switches independently hide point categories and junctions", async () => {
+  const [legend, viewport, store, types, css] = await Promise.all([
+    readFile(new URL("app/components/RootColorLegend.tsx", root), "utf8"),
+    readFile(new URL("app/components/RootViewport.tsx", root), "utf8"),
+    readFile(new URL("app/store.ts", root), "utf8"),
+    readFile(new URL("app/types.ts", root), "utf8"),
+    readFile(new URL("app/globals.css", root), "utf8"),
+  ]);
+  for (const category of [
+    "primary",
+    "order1",
+    "order2",
+    "order3",
+    "higherOrder",
+    "uncertain",
+    "unassigned",
+    "junctions",
+  ]) {
+    assert.match(legend, new RegExp(`category: "${category}"`));
+    assert.match(store, new RegExp(`${category}: true`));
+  }
+  assert.match(types, /export type DisplayCategory/);
+  assert.match(legend, /role="switch"/);
+  assert.match(legend, /aria-checked=\{visible\}/);
+  assert.match(legend, /toggleDisplayCategory\(item\.category\)/);
+  assert.match(store, /toggleDisplayCategory/);
+  assert.match(viewport, /makeSurfaceVisibility/);
+  assert.match(viewport, /attribute float categoryVisible/);
+  assert.match(viewport, /vCategoryVisible < 0\.999/);
+  assert.match(viewport, /surfaceVisibility\[candidate\.face\.a\] === 1/);
+  assert.match(viewport, /visibleRoots = roots\.filter/);
+  assert.match(viewport, /!displayVisibility\.junctions/);
+  assert.match(css, /\.legend-visibility-switch/);
+  assert.match(css, /li\.is-hidden/);
 });
 
 test("redraws every wheel zoom and cancels automated focus on manual control", async () => {

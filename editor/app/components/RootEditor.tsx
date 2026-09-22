@@ -13,6 +13,7 @@ import {
   bootstrapViewer,
   browseDataset,
   exportEdits,
+  fetchVertexInfo,
   historyAction,
   initialApiBase,
   initialViewerContext,
@@ -21,7 +22,13 @@ import {
   switchDataset,
 } from "../lib/api";
 import { useEditorStore } from "../store";
-import type { MeshHit, OperationResponse, RootRecord } from "../types";
+import type {
+  MeshHit,
+  MeshHitContext,
+  OperationResponse,
+  RootRecord,
+  VertexInfo,
+} from "../types";
 import {
   ConfirmDialog,
   ConnectionScreen,
@@ -32,6 +39,7 @@ import {
   HoverTooltip,
   MeshLoading,
   PanelHeader,
+  PointInspectionCard,
   TOOLS,
   Toolbar,
   ToolGuidance,
@@ -46,6 +54,14 @@ type Toast = {
   id: number;
   tone: "success" | "error" | "info";
   message: string;
+};
+
+type PointInspection = {
+  hit: MeshHit;
+  context: MeshHitContext;
+  exact: VertexInfo | null;
+  loadingExact: boolean;
+  exactError: string;
 };
 
 export function RootEditor() {
@@ -101,8 +117,17 @@ export function RootEditor() {
   const [toasts, setToasts] = useState<Toast[]>([]);
   const [leftCollapsed, setLeftCollapsed] = useState(false);
   const [rightCollapsed, setRightCollapsed] = useState(false);
+  const [pointInspection, setPointInspection] = useState<PointInspection | null>(
+    null,
+  );
   const toastCounter = useRef(0);
+  const pointInspectionRequest = useRef(0);
   const scaleInitialized = useRef(false);
+
+  const clearPointInspection = useCallback(() => {
+    pointInspectionRequest.current += 1;
+    setPointInspection(null);
+  }, []);
 
   const selectedRoot = useMemo(
     () =>
@@ -121,6 +146,10 @@ export function RootEditor() {
       serverState?.roots.find((root) => root.root_id === hovered?.rootId) ?? null,
     [hovered?.rootId, serverState?.roots],
   );
+  const inspectedPointRoot = useMemo(() => {
+    const rootId = pointInspection?.exact?.root_id ?? pointInspection?.hit.rootId;
+    return serverState?.roots.find((root) => root.root_id === rootId) ?? null;
+  }, [pointInspection, serverState?.roots]);
   const toolDefinition =
     TOOLS.find((candidate) => candidate.id === tool) ?? TOOLS[0];
   const selectedJunction = serverState?.junctions?.find((junction) => junction.junction_id === selectedJunctionId);
@@ -144,6 +173,7 @@ export function RootEditor() {
 
   const selectAndFocus = useCallback(
     (rootId: string) => {
+      clearPointInspection();
       if (
         rootId !== selectedRootId &&
         (tool === "create" || tool === "redraw")
@@ -155,6 +185,7 @@ export function RootEditor() {
     },
     [
       clearDraft,
+      clearPointInspection,
       requestFocus,
       selectedRootId,
       setSelectedRootId,
@@ -164,10 +195,11 @@ export function RootEditor() {
 
   const selectPatchAndFocus = useCallback(
     (patchId: string) => {
+      clearPointInspection();
       setSelectedPatchId(patchId);
       requestPatchFocus(patchId);
     },
-    [requestPatchFocus, setSelectedPatchId],
+    [clearPointInspection, requestPatchFocus, setSelectedPatchId],
   );
 
   useEffect(() => {
@@ -197,6 +229,7 @@ export function RootEditor() {
         saveViewerId(resolvedPayload.viewer_id);
         setViewerId(resolvedPayload.viewer_id);
         setRecentDatasets(resolvedPayload.recent_datasets);
+        clearPointInspection();
         replaceDataset(resolvedPayload.state);
         setConnectionState("connected");
         setConnectionError("");
@@ -211,7 +244,7 @@ export function RootEditor() {
         );
       });
     return () => controller.abort();
-  }, [apiBase, connectNonce, replaceDataset]);
+  }, [apiBase, clearPointInspection, connectNonce, replaceDataset]);
 
   const runOperation = useCallback(
     async (
@@ -233,6 +266,7 @@ export function RootEditor() {
           operationType,
           args,
         );
+        clearPointInspection();
         setServerState(response.state);
         notify("success", message);
         return response;
@@ -244,7 +278,15 @@ export function RootEditor() {
         setBusyMessage("");
       }
     },
-    [apiBase, busy, notify, serverState, setServerState, viewerId],
+    [
+      apiBase,
+      busy,
+      clearPointInspection,
+      notify,
+      serverState,
+      setServerState,
+      viewerId,
+    ],
   );
 
   const runHistory = useCallback(
@@ -256,6 +298,7 @@ export function RootEditor() {
       );
       try {
         const response = await historyAction(apiBase, viewerId, action);
+        clearPointInspection();
         setServerState(response.state);
         clearDraft();
         notify("success", action === "undo" ? "Edit undone." : "Edit restored.");
@@ -270,6 +313,7 @@ export function RootEditor() {
       apiBase,
       busy,
       clearDraft,
+      clearPointInspection,
       notify,
       serverState?.read_only,
       setServerState,
@@ -297,18 +341,75 @@ export function RootEditor() {
     [brushRadius, notify, runOperation, selectedRootId],
   );
 
+  const inspectExactPoint = useCallback(
+    async (hit: MeshHit, context: MeshHitContext) => {
+      const requestId = ++pointInspectionRequest.current;
+      setPointInspection({
+        hit,
+        context,
+        exact: null,
+        loadingExact: true,
+        exactError: "",
+      });
+      try {
+        const exact = await fetchVertexInfo(
+          apiBase,
+          viewerId,
+          hit.vertexIndex,
+        );
+        if (pointInspectionRequest.current !== requestId) return;
+        setPointInspection({
+          hit,
+          context,
+          exact,
+          loadingExact: false,
+          exactError: "",
+        });
+      } catch (error) {
+        if (pointInspectionRequest.current !== requestId) return;
+        setPointInspection({
+          hit,
+          context,
+          exact: null,
+          loadingExact: false,
+          exactError:
+            error instanceof Error ? error.message : String(error),
+        });
+      }
+    },
+    [apiBase, viewerId],
+  );
+
   const handleHit = useCallback(
-    async (hit: MeshHit) => {
+    async (hit: MeshHit, context: MeshHitContext) => {
       if (!serverState || busy) return;
+      if (context.ctrlKey) {
+        await inspectExactPoint(hit, context);
+        return;
+      }
+      pointInspectionRequest.current += 1;
       if (serverState.read_only && tool !== "select") {
+        setPointInspection(null);
         notify("info", "This duplicate dataset window is read-only.");
         setTool("select");
         return;
       }
       if (tool === "select" || tool === "order") {
+        setPointInspection(
+          hit.rootId
+            ? null
+            : {
+                hit,
+                context,
+                exact: null,
+                loadingExact: false,
+                exactError: "",
+              },
+        );
         setSelectedRootId(hit.rootId);
         return;
       }
+      setPointInspection(null);
       if (tool === "split") {
         if (!hit.rootId) {
           notify("info", "Choose an assigned root surface for the split.");
@@ -416,6 +517,7 @@ export function RootEditor() {
       addDraftPoint,
       busy,
       handleBrushStroke,
+      inspectExactPoint,
       notify,
       runOperation,
       selectedRootId,
@@ -552,6 +654,7 @@ export function RootEditor() {
         const payload = await switchDataset(apiBase, viewerId, outputDir);
         if (!payload.state) throw new Error("The selected dataset did not open.");
         scaleInitialized.current = false;
+        clearPointInspection();
         replaceDataset(payload.state);
         setRecentDatasets(payload.recent_datasets);
         setPendingDataset(null);
@@ -570,7 +673,15 @@ export function RootEditor() {
         setBusyMessage("");
       }
     },
-    [apiBase, busy, notify, replaceDataset, serverState, viewerId],
+    [
+      apiBase,
+      busy,
+      clearPointInspection,
+      notify,
+      replaceDataset,
+      serverState,
+      viewerId,
+    ],
   );
 
   const requestDatasetSwitch = useCallback(
@@ -640,6 +751,7 @@ export function RootEditor() {
     const normalized = saveApiBase(candidate);
     setConnectionState("connecting");
     setConnectionError("");
+    clearPointInspection();
     setApiBase(normalized);
     setConnectNonce((value) => value + 1);
   };
@@ -663,6 +775,7 @@ export function RootEditor() {
       }
       if (event.key === "Escape") {
         setDeleteCandidate(null);
+        clearPointInspection();
         clearDraft();
         setTool("select");
         return;
@@ -680,7 +793,7 @@ export function RootEditor() {
     };
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [clearDraft, runHistory, serverState?.read_only, setTool]);
+  }, [clearDraft, clearPointInspection, runHistory, serverState?.read_only, setTool]);
 
   if (connectionState !== "connected") {
     return (
@@ -864,8 +977,23 @@ export function RootEditor() {
         <span className="fingerprint" title={serverState.baseline_fingerprint}>{serverState.baseline_fingerprint.slice(0, 19)}…</span>
       </footer>
 
-      {hovered ? (
+      {hovered && !(
+        pointInspection &&
+        Math.abs(hovered.clientX - pointInspection.context.clientX) < 4 &&
+        Math.abs(hovered.clientY - pointInspection.context.clientY) < 4
+      ) ? (
         <HoverTooltip hovered={hovered} root={hoveredRoot} activeTool={tool} />
+      ) : null}
+
+      {pointInspection ? (
+        <PointInspectionCard
+          hit={pointInspection.hit}
+          context={pointInspection.context}
+          root={inspectedPointRoot}
+          exact={pointInspection.exact}
+          loadingExact={pointInspection.loadingExact}
+          exactError={pointInspection.exactError}
+        />
       ) : null}
 
       {busy ? (

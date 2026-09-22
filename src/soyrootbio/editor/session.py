@@ -292,6 +292,41 @@ class EditorSession:
                 self.label_revision,
             )
 
+    def vertex_snapshot(self, vertex_index: int) -> dict[str, Any]:
+        """Return one mesh vertex without reducing its source-coordinate precision."""
+
+        with self._lock:
+            self._ensure_open()
+            index = int(vertex_index)
+            if index < 0 or index >= self.mesh.vertex_count:
+                raise EditorValidationError(
+                    f"Vertex index {index} is outside the mesh vertex array."
+                )
+            numeric_label = int(self.mesh.root_labels[index])
+            root = next(
+                (
+                    candidate
+                    for candidate in self.roots.values()
+                    if candidate.numeric_label == numeric_label
+                ),
+                None,
+            )
+            if root is not None:
+                label = root.root_id
+            elif numeric_label == -2:
+                label = "uncertain"
+            elif numeric_label == -1:
+                label = "unassigned"
+            else:
+                label = f"label {numeric_label}"
+            return {
+                "vertex_index": index,
+                "numeric_label": numeric_label,
+                "label": label,
+                "root_id": root.root_id if root is not None else None,
+                "position": self.mesh.positions[index].tolist(),
+            }
+
     def point_patch_indices_snapshot(
         self,
         patch_id: str,

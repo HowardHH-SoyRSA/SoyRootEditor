@@ -1,6 +1,7 @@
 import type {
   EditorState,
   OperationResponse,
+  VertexInfo,
   ViewerBootstrap,
 } from "../types";
 
@@ -235,4 +236,19 @@ export async function fetchPointPatchIndices(
     );
   }
   return indices;
+}
+
+export async function fetchVertexInfo(
+  apiBase: string,
+  viewerId: string,
+  vertexIndex: number,
+): Promise<VertexInfo> {
+  const response = await fetch(
+    apiUrl(apiBase, `/api/vertices/${vertexIndex}`),
+    {
+      cache: "no-store",
+      headers: viewerHeaders(viewerId),
+    },
+  );
+  return readJson<VertexInfo>(response);
 }

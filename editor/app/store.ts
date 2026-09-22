@@ -1,7 +1,27 @@
 "use client";
 
 import { create } from "zustand";
-import type { EditorState, HoverInfo, JunctionHover, LoadProgress, ToolMode, Vec3 } from "./types";
+import type {
+  DisplayCategory,
+  DisplayVisibility,
+  EditorState,
+  HoverInfo,
+  JunctionHover,
+  LoadProgress,
+  ToolMode,
+  Vec3,
+} from "./types";
+
+export const DEFAULT_DISPLAY_VISIBILITY: DisplayVisibility = {
+  primary: true,
+  order1: true,
+  order2: true,
+  order3: true,
+  higherOrder: true,
+  uncertain: true,
+  unassigned: true,
+  junctions: true,
+};
 
 interface EditorUiState {
   serverState: EditorState | null;
@@ -18,6 +38,7 @@ interface EditorUiState {
   loadProgress: LoadProgress;
   meshReady: boolean;
   clientGpu: string | null;
+  displayVisibility: DisplayVisibility;
   setServerState: (state: EditorState) => void;
   replaceDataset: (state: EditorState | null) => void;
   setSelectedRootId: (rootId: string | null) => void;
@@ -35,6 +56,7 @@ interface EditorUiState {
   setLoadProgress: (progress: LoadProgress) => void;
   setMeshReady: (ready: boolean) => void;
   setClientGpu: (gpu: string | null) => void;
+  toggleDisplayCategory: (category: DisplayCategory) => void;
 }
 
 export const useEditorStore = create<EditorUiState>((set) => ({
@@ -52,6 +74,7 @@ export const useEditorStore = create<EditorUiState>((set) => ({
   loadProgress: { phase: "idle", progress: 0, message: "Waiting for dataset" },
   meshReady: false,
   clientGpu: null,
+  displayVisibility: { ...DEFAULT_DISPLAY_VISIBILITY },
   setServerState: (serverState) =>
     set((current) => {
       const stillExists =
@@ -139,4 +162,13 @@ export const useEditorStore = create<EditorUiState>((set) => ({
   setLoadProgress: (loadProgress) => set({ loadProgress }),
   setMeshReady: (meshReady) => set({ meshReady }),
   setClientGpu: (clientGpu) => set({ clientGpu }),
+  toggleDisplayCategory: (category) =>
+    set((current) => ({
+      displayVisibility: {
+        ...current.displayVisibility,
+        [category]: !current.displayVisibility[category],
+      },
+      hovered: null,
+      hoveredJunction: null,
+    })),
 }));

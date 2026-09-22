@@ -1,12 +1,14 @@
 "use client";
 
-import type { FormEvent } from "react";
+import { useState, type FormEvent } from "react";
 import type {
   EditorState,
   HoverInfo,
   LoadProgress,
+  MeshHit,
   RootRecord,
   ToolMode,
+  VertexInfo,
 } from "../types";
 import {
   ROOT_EXPORT_COLORS,
@@ -23,7 +25,7 @@ export interface ToolDefinition {
 }
 
 export const TOOLS: ToolDefinition[] = [
-  { id: "select", label: "Inspect", mark: "⌖", shortcut: "1", help: "Click a root to highlight and frame it. Hover or click a cyan junction ring to inspect or switch branch identities." },
+  { id: "select", label: "Inspect", mark: "⌖", shortcut: "1", help: "Click a root or an unassigned/uncertain point to inspect it. Ctrl + left-click any point for its exact source coordinate. Cyan junction rings inspect branch identities." },
   { id: "create", label: "Create", mark: "+", shortcut: "0", help: "Select a parent root, then draw through two or more grey unassigned points." },
   { id: "split", label: "Split", mark: "⑂", shortcut: "2", help: "Click inside a root to split its centerline at the nearest path point." },
   { id: "merge", label: "Merge", mark: "⋈", shortcut: "3", help: "Select the root to keep, then click a locally connected root with compatible direction." },
@@ -434,6 +436,131 @@ export function HoverTooltip({
       <small>Click to {clickInstruction}.</small>
     </div>
   );
+}
+
+export function PointInspectionCard({
+  hit,
+  context,
+  root,
+  exact,
+  loadingExact,
+  exactError,
+}: {
+  hit: MeshHit;
+  context: { clientX: number; clientY: number };
+  root: RootRecord | null;
+  exact: VertexInfo | null;
+  loadingExact: boolean;
+  exactError: string;
+}) {
+  const [copyResult, setCopyResult] = useState<{
+    coordinate: string;
+    status: "copied" | "error";
+  } | null>(null);
+  const requestedExact = loadingExact || Boolean(exact) || Boolean(exactError);
+  const label = exact?.label ?? root?.root_id ?? pointStateLabel(hit.numericLabel);
+  const numericLabel = exact?.numeric_label ?? hit.numericLabel;
+  const coordinateText = exact
+    ? `(${exact.position.map(formatExactCoordinate).join(", ")})`
+    : "";
+  const currentCopyStatus =
+    copyResult?.coordinate === coordinateText ? copyResult.status : null;
+  const left =
+    typeof window === "undefined"
+      ? context.clientX + 16
+      : Math.max(8, Math.min(context.clientX + 16, window.innerWidth - 326));
+  const estimatedHeight = requestedExact ? 278 : 148;
+  const top =
+    typeof window === "undefined"
+      ? context.clientY + 16
+      : Math.max(8, Math.min(context.clientY + 16, window.innerHeight - estimatedHeight));
+  const color = root
+    ? rootOrderCssColor(root.root_order)
+    : rgbToCss(
+        numericLabel === -2
+          ? ROOT_EXPORT_COLORS.uncertain
+          : ROOT_EXPORT_COLORS.unassigned,
+      );
+
+  const copyCoordinates = async () => {
+    try {
+      if (!navigator.clipboard?.writeText) {
+        throw new Error("Clipboard API unavailable");
+      }
+      await navigator.clipboard.writeText(coordinateText);
+      setCopyResult({ coordinate: coordinateText, status: "copied" });
+    } catch {
+      setCopyResult({ coordinate: coordinateText, status: "error" });
+    }
+  };
+
+  return (
+    <div
+      className="point-inspection-card"
+      style={{ left, top }}
+      role="status"
+      aria-live="polite"
+    >
+      <div className="hover-title">
+        <i style={{ background: color }} />
+        <strong>{capitalizePointLabel(label)}</strong>
+        <span>{numericLabel}</span>
+      </div>
+      <dl>
+        <div><dt>Vertex</dt><dd>{hit.vertexIndex.toLocaleString()}</dd></div>
+        <div><dt>Label</dt><dd>{capitalizePointLabel(label)}</dd></div>
+      </dl>
+      {loadingExact ? (
+        <p className="point-coordinate-status">Loading exact source coordinate…</p>
+      ) : exact ? (
+        <div className="point-coordinate-section">
+          <div className="point-coordinate-grid" aria-label="Exact source coordinate">
+            {(["X", "Y", "Z"] as const).map((axis, index) => (
+              <div key={axis}>
+                <span>{axis}</span>
+                <code>{formatExactCoordinate(exact.position[index])}</code>
+              </div>
+            ))}
+          </div>
+          <div className="point-coordinate-actions">
+            {currentCopyStatus === "error" ? (
+              <span className="point-coordinate-copy-error">Copy failed</span>
+            ) : null}
+            <button
+              type="button"
+              className="point-coordinate-copy"
+              onClick={() => void copyCoordinates()}
+              aria-label={`Copy coordinates ${coordinateText}`}
+              title={`Copy ${coordinateText}`}
+            >
+              {currentCopyStatus === "copied" ? "Copied" : "Copy XYZ"}
+            </button>
+          </div>
+        </div>
+      ) : exactError ? (
+        <p className="point-coordinate-error">{exactError}</p>
+      ) : (
+        <small>Ctrl + left-click a point to show its exact source XYZ.</small>
+      )}
+    </div>
+  );
+}
+
+function pointStateLabel(numericLabel: number): string {
+  if (numericLabel === -2) return "uncertain";
+  if (numericLabel === -1) return "unassigned";
+  return `label ${numericLabel}`;
+}
+
+function capitalizePointLabel(label: string): string {
+  return label === "uncertain" || label === "unassigned"
+    ? `${label[0].toUpperCase()}${label.slice(1)}`
+    : label;
+}
+
+function formatExactCoordinate(value: number): string {
+  if (Object.is(value, -0)) return "-0";
+  return value.toString();
 }
 
 export function ToolGuidance({ tool }: { tool: ToolDefinition }) {
