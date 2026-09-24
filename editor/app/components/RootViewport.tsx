@@ -77,6 +77,8 @@ interface ViewRuntime {
 
 const INSERTION_COLOR = rgbToNumber(ROOT_EXPORT_COLORS.higherOrder);
 const TIP_COLOR = 0xff5c64;
+const CENTERLINE_HIGHLIGHT_RGB = [255, 48, 48] as const;
+const CENTERLINE_HIGHLIGHT_COLOR = 0xff3030;
 
 export function RootViewport({
   apiBase,
@@ -97,6 +99,7 @@ export function RootViewport({
   const selectedJunctionId = useEditorStore((store) => store.selectedJunctionId);
   const hoveredJunctionId = useEditorStore((store) => store.hoveredJunction?.junctionId);
   const displayVisibility = useEditorStore((store) => store.displayVisibility);
+  const highlightCenterlinesRed = useEditorStore((store) => store.highlightCenterlinesRed);
   const setHoveredJunction = useEditorStore((store) => store.setHoveredJunction);
   const activeTool = useEditorStore((store) => store.tool);
   const draftPoints = useEditorStore((store) => store.draftPoints);
@@ -1010,11 +1013,13 @@ export function RootViewport({
       draftPoints,
       activeTool,
       displayVisibility,
+      highlightCenterlinesRed,
     );
     runtime.renderRequested = true;
   }, [
     activeTool,
     displayVisibility,
+    highlightCenterlinesRed,
     draftPoints,
     selectedPatchId,
     selectedRootId,
@@ -1239,6 +1244,7 @@ function rebuildCenterlines(
   draftPoints: Vec3[],
   activeTool: ToolMode,
   visibility: DisplayVisibility,
+  highlightCenterlinesRed: boolean,
 ) {
   disposeGroup(runtime.lineGroup);
   disposeGroup(runtime.relationGroup);
@@ -1255,7 +1261,9 @@ function rebuildCenterlines(
   const colors = new Uint8Array(segmentCount * 6);
   let cursor = 0;
   for (const root of visibleRoots) {
-    const color = rootOrderRgb(root.root_order);
+    const color = highlightCenterlinesRed
+      ? CENTERLINE_HIGHLIGHT_RGB
+      : rootOrderRgb(root.root_order);
     for (let point = 1; point < root.polyline.length; point += 1) {
       const start = root.polyline[point - 1];
       const end = root.polyline[point];
@@ -1292,7 +1300,8 @@ function rebuildCenterlines(
     new THREE.LineBasicMaterial({
       vertexColors: true,
       transparent: true,
-      opacity: selectedRootId ? 0.2 : 0.58,
+      opacity: selectedRootId ? 0.2 : highlightCenterlinesRed ? 0.9 : 0.58,
+      depthTest: !highlightCenterlinesRed,
       depthWrite: false,
     }),
   );
@@ -1310,7 +1319,7 @@ function rebuildCenterlines(
       opacity: number;
     }> = [{
       root: selected,
-      color: rootOrderColorNumber(selected.root_order),
+      color: highlightCenterlinesRed ? CENTERLINE_HIGHLIGHT_COLOR : rootOrderColorNumber(selected.root_order),
       width: 4.6,
       opacity: 1,
     }];
@@ -1320,7 +1329,7 @@ function rebuildCenterlines(
     if (parent) {
       relations.push({
         root: parent,
-        color: rootOrderColorNumber(parent.root_order),
+        color: highlightCenterlinesRed ? CENTERLINE_HIGHLIGHT_COLOR : rootOrderColorNumber(parent.root_order),
         width: 3,
         opacity: 0.9,
       });
@@ -1330,7 +1339,7 @@ function rebuildCenterlines(
       if (child) {
         relations.push({
           root: child,
-          color: rootOrderColorNumber(child.root_order),
+          color: highlightCenterlinesRed ? CENTERLINE_HIGHLIGHT_COLOR : rootOrderColorNumber(child.root_order),
           width: 3,
           opacity: 0.92,
         });
@@ -1344,6 +1353,7 @@ function rebuildCenterlines(
         relation.color,
         relation.width,
         relation.opacity,
+        !highlightCenterlinesRed,
       );
     }
 
@@ -1445,6 +1455,7 @@ function addWideLine(
   color: number,
   width: number,
   opacity: number,
+  depthTest = true,
 ) {
   if (points.length < 2) return;
   const geometry = new LineGeometry();
@@ -1460,7 +1471,7 @@ function addWideLine(
     linewidth: width,
     transparent: opacity < 1,
     opacity,
-    depthTest: true,
+    depthTest,
     depthWrite: false,
   });
   material.resolution.set(

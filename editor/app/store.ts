@@ -39,6 +39,7 @@ interface EditorUiState {
   meshReady: boolean;
   clientGpu: string | null;
   displayVisibility: DisplayVisibility;
+  highlightCenterlinesRed: boolean;
   setServerState: (state: EditorState) => void;
   replaceDataset: (state: EditorState | null) => void;
   setSelectedRootId: (rootId: string | null) => void;
@@ -57,6 +58,7 @@ interface EditorUiState {
   setMeshReady: (ready: boolean) => void;
   setClientGpu: (gpu: string | null) => void;
   toggleDisplayCategory: (category: DisplayCategory) => void;
+  toggleCenterlineHighlight: () => void;
 }
 
 export const useEditorStore = create<EditorUiState>((set) => ({
@@ -75,6 +77,7 @@ export const useEditorStore = create<EditorUiState>((set) => ({
   meshReady: false,
   clientGpu: null,
   displayVisibility: { ...DEFAULT_DISPLAY_VISIBILITY },
+  highlightCenterlinesRed: false,
   setServerState: (serverState) =>
     set((current) => {
       const stillExists =
@@ -170,5 +173,9 @@ export const useEditorStore = create<EditorUiState>((set) => ({
       },
       hovered: null,
       hoveredJunction: null,
+    })),
+  toggleCenterlineHighlight: () =>
+    set((current) => ({
+      highlightCenterlinesRed: !current.highlightCenterlinesRed,
     })),
 }));

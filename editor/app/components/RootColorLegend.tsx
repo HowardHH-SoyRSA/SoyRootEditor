@@ -3,6 +3,7 @@ import { useEditorStore } from "../store";
 import type { DisplayCategory } from "../types";
 
 const JUNCTION_COLOR = [102, 217, 255] as const;
+const CENTERLINE_HIGHLIGHT_COLOR = "#FF3030";
 
 const LEGEND_ITEMS = [
   { category: "primary", label: "Primary", order: "O0", color: ROOT_EXPORT_COLORS.primary },
@@ -25,6 +26,8 @@ export function RootColorLegend({ collapsed }: { collapsed: boolean }) {
   const toggleDisplayCategory = useEditorStore(
     (store) => store.toggleDisplayCategory,
   );
+  const highlightCenterlinesRed = useEditorStore((store) => store.highlightCenterlinesRed);
+  const toggleCenterlineHighlight = useEditorStore((store) => store.toggleCenterlineHighlight);
   return (
     <aside
       className={`root-color-legend ${collapsed ? "is-collapsed" : ""}`}
@@ -61,8 +64,23 @@ export function RootColorLegend({ collapsed }: { collapsed: boolean }) {
             </li>
           );
         })}
+        <li className={`centerline-highlight-control ${highlightCenterlinesRed ? "is-visible" : "is-hidden"}`}>
+          <button
+            type="button"
+            className="legend-visibility-switch"
+            role="switch"
+            aria-checked={highlightCenterlinesRed}
+            aria-label="Highlight centerlines in red"
+            title="Highlight centerlines in red"
+            onClick={toggleCenterlineHighlight}
+          >
+            <i aria-hidden="true" style={{ background: CENTERLINE_HIGHLIGHT_COLOR }} />
+          </button>
+          <span>Red centerlines<b>UI</b></span>
+          <code>{CENTERLINE_HIGHLIGHT_COLOR}</code>
+        </li>
       </ul>
-      {!collapsed ? <p className="junction-legend">Each switch controls viewport visibility only; exported labels and colors are unchanged.</p> : null}
+      {!collapsed ? <p className="junction-legend">Switches control the viewport only; exported labels and colors are unchanged.</p> : null}
     </aside>
   );
 }
